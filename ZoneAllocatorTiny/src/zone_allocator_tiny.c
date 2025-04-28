@@ -9,7 +9,8 @@
 
 uint8_t *tiny_zone_map = NULL; // Pointer to the tiny zone
 void *tiny_zone_start = NULL; // Pointer to the tiny zone
-void *tiny_zone_end = NULL; // Pointer to the tiny zone 
+void *tiny_zone_end = NULL; // Pointer to the tiny zone
+size_t tiny_zone_mapped_size = 0u;
 
 // Allocates a block of memory of the given size.
 void *ZoneAllocatorTiny_alloc(size_t size)
@@ -18,9 +19,9 @@ void *ZoneAllocatorTiny_alloc(size_t size)
     if (tiny_zone_map == NULL)
     {
         int page_size = sysconf(_SC_PAGESIZE) ; // Get the page size
-        uint8_t aligned_size = TINY_ALLOC_SIZE / page_size; // Calculate the number of aligned blocks
-        aligned_size = (aligned_size * page_size) + ((TINY_ALLOC_SIZE % page_size == 0u) ? (0u) : (page_size)); // Align to page size
-        tiny_zone_map = mmap(NULL, 100, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+        tiny_zone_mapped_size= TINY_ALLOC_SIZE / page_size; // Calculate the number of aligned blocks
+        tiny_zone_mapped_size = (tiny_zone_mapped_size * page_size) + ((TINY_ALLOC_SIZE % page_size == 0u) ? (0u) : (page_size)); // Align to page size
+        tiny_zone_map = mmap(NULL, tiny_zone_mapped_size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
         if (tiny_zone_map == MAP_FAILED)
         {
             printf("XX\n");
@@ -98,6 +99,20 @@ short ZoneAllocatorTiny_free(void *ptr)
         else  // Free the block
         {
             tiny_zone_map[index] = 0u; // Mark the block as free
+            uint8_t i;
+            for (i = 0; i < TINY_ALLOC_COUNT; i++)
+            {
+                if (tiny_zone_map[i] != 0u)
+                {
+                    break;
+                }
+            }
+            if (i == TINY_ALLOC_COUNT)
+            {
+                munmap((void *)tiny_zone_map, tiny_zone_mapped_size);
+                tiny_zone_mapped_size = 0u;
+                tiny_zone_map = NULL;
+            }
         }
     }
     return (ret);
@@ -261,9 +276,12 @@ void print_size(uint8_t size)
 // This function prints the memory map of the tiny zone.
 // It prints the start address, end address, and size of each block.
 // It also prints the start address of the tiny zone.
-void ZoneAllocatorTiny_report(void) {
-    
-    
+void ZoneAllocatorTiny_report(void)
+{
+    if (tiny_zone_map == NULL)
+    {
+        return;
+    }
     write (1, "TINY : ", 6);
     print_address_as_hex(tiny_zone_map); // Print the start address
     write (1, "\n", 1);

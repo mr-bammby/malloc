@@ -1,7 +1,8 @@
 #include "../../ZoneAllocatorTiny/inc_pub/zone_allocator_tiny.h"
 #include <stddef.h>
 
-void *ft_malloc(size_t size) {
+void *ft_malloc(size_t size)
+{
     
     void *ptr = NULL;
     if (size <= TINY_ALLOC_SIZE)

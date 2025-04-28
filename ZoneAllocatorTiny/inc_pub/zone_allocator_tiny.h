@@ -11,6 +11,7 @@ short ZoneAllocatorTiny_free(void *ptr);
 void *ZoneAllocatorTiny_realloc(void *ptr, size_t size);
 
 uint8_t ZoneAllocatorTiny_size_get(void *ptr);
+void ZoneAllocatorTiny_report(void);
 
 
 
