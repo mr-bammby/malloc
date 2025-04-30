@@ -1,36 +1,33 @@
-#include "../inc_pub/zone_allocator_tiny.h"
+#include "../inc_pub/zone_allocator_small.h"
 #include <sys/mman.h>
 #include <inttypes.h>
 #include <unistd.h>
 #include <stdio.h>
 
-#define TINY_ALLOC_COUNT 100u // Number of allocations
-#define TINY_ZONE_SIZE (TINY_ALLOC_SIZE * TINY_ALLOC_COUNT) + TINY_ALLOC_COUNT  // Total size of the tiny zone
+#define SMALL_ALLOC_COUNT 100u // Number of allocations
+#define SMALL_HEADER_SIZE 20u // Size of the header
+#define SMALL_ZONE_SIZE ((SMALL_ALLOC_SIZE + SMALL_HEADER_SIZE) * SMALL_ALLOC_COUNT)  // Total size of the small zone
 
-uint8_t *tiny_zone_map = NULL; // Pointer to the tiny zone
-void *tiny_zone_start = NULL; // Pointer to the tiny zone
-void *tiny_zone_end = NULL; // Pointer to the tiny zone
-size_t tiny_zone_mapped_size = 0u;
-size_t tiny_alloced_cnt;
+
+void *small_zone_start = NULL; // Pointer to the small zone
+void *small_zone_end = NULL; // Pointer to the small zone
+size_t small_zone_mapped_size = 0u;
 
 // Allocates a block of memory of the given size.
-void *ZoneAllocatorTiny_alloc(size_t size)
+void *ZoneAllocatorSmall_alloc(size_t size)
 {
-    if (tiny_zone_map == NULL)
+    if (small_zone_start == NULL)
     {
         int page_size = sysconf(_SC_PAGESIZE) ; // Get the page size
-        tiny_zone_mapped_size= TINY_ALLOC_SIZE / page_size; // Calculate the number of aligned blocks
-        tiny_zone_mapped_size = (tiny_zone_mapped_size * page_size) + ((TINY_ALLOC_SIZE % page_size == 0u) ? (0u) : (page_size)); // Align to page size
-        tiny_zone_map = mmap(NULL, tiny_zone_mapped_size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+        small_zone_mapped_size = SMALL_ALLOC_SIZE / page_size; // Calculate the number of aligned blocks
+        small_zone_mapped_size = (small_zone_mapped_size * page_size) + ((SMALL_ALLOC_SIZE % page_size == 0u) ? (0u) : (page_size)); // Align to page size
+        small_zone_start = mmap(NULL, small_zone_mapped_size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
         if (tiny_zone_map == MAP_FAILED)
         {
             return NULL; // Allocation failed
         }
-        uint8_t aligned_count = TINY_ALLOC_COUNT / 16u; // Calculate the number of aligned blocks
-        aligned_count = (aligned_count * 16) + ((TINY_ALLOC_COUNT % 16u == 0u) ? (0u) : (16u)); // Align to 16
-        tiny_zone_start = tiny_zone_map + aligned_count; // Set the start pointer
-        tiny_zone_end = tiny_zone_start + TINY_ALLOC_SIZE * TINY_ALLOC_COUNT; // Set the end pointer
-        tiny_alloced_cnt = 0u;
+        small_zone_end = small_zone_start = ; // Set the end pointer
+        tiny_malloced_cnt = 0u;
     }
 
     for(uint8_t i = 0u; i < TINY_ALLOC_COUNT; i++)
@@ -38,7 +35,6 @@ void *ZoneAllocatorTiny_alloc(size_t size)
         if ((tiny_zone_map[i]) == 0u)
         {
             tiny_zone_map[i] = size; // Mark the block as used
-            tiny_alloced_cnt++;
             return (tiny_zone_start + (i * TINY_ALLOC_SIZE)); // Return the pointer to the allocated memory
         }
     }
@@ -99,8 +95,15 @@ short ZoneAllocatorTiny_free(void *ptr)
         else  // Free the block
         {
             tiny_zone_map[index] = 0u; // Mark the block as free
-            tiny_alloced_cnt--;
-            if (tiny_alloced_cnt == 0u)
+            uint8_t i;
+            for (i = 0; i < TINY_ALLOC_COUNT; i++)
+            {
+                if (tiny_zone_map[i] != 0u)
+                {
+                    break;
+                }
+            }
+            if (i == TINY_ALLOC_COUNT)
             {
                 munmap((void *)tiny_zone_map, tiny_zone_mapped_size);
                 tiny_zone_mapped_size = 0u;
