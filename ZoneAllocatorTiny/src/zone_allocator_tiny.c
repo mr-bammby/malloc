@@ -6,6 +6,7 @@
 
 #define TINY_ALLOC_COUNT 100u // Number of allocations
 #define TINY_ZONE_SIZE (TINY_ALLOC_SIZE * TINY_ALLOC_COUNT) + TINY_ALLOC_COUNT  // Total size of the tiny zone
+#define TINY_ALLOC_ALIGMENT 16u // Alignment of the tiny allocation
 
 uint8_t *tiny_zone_map = NULL; // Pointer to the tiny zone
 void *tiny_zone_start = NULL; // Pointer to the tiny zone
@@ -26,8 +27,8 @@ void *ZoneAllocatorTiny_alloc(size_t size)
         {
             return NULL; // Allocation failed
         }
-        uint8_t aligned_count = TINY_ALLOC_COUNT / 16u; // Calculate the number of aligned blocks
-        aligned_count = (aligned_count * 16) + ((TINY_ALLOC_COUNT % 16u == 0u) ? (0u) : (16u)); // Align to 16
+        uint8_t aligned_count = TINY_ALLOC_COUNT / TINY_ALLOC_ALIGMENT; // Calculate the number of aligned blocks
+        aligned_count = (aligned_count * TINY_ALLOC_ALIGMENT) + ((TINY_ALLOC_COUNT % TINY_ALLOC_ALIGMENT == 0u) ? (0u) : (TINY_ALLOC_ALIGMENT)); // Align to 16
         tiny_zone_start = tiny_zone_map + aligned_count; // Set the start pointer
         tiny_zone_end = tiny_zone_start + TINY_ALLOC_SIZE * TINY_ALLOC_COUNT; // Set the end pointer
         tiny_alloced_cnt = 0u;
