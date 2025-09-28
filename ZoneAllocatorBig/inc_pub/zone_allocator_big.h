@@ -3,6 +3,8 @@
 
 #include <stdlib.h>
 
+#define BIG_ALLOC_SIZE_MIN 4066u // Minimum size of the big allocation
+
 void *ZoneAllocatorBig_alloc(size_t size);
 short ZoneAllocatorBig_free(void *ptr);
 void *ZoneAllocatorBig_realloc(void *ptr, size_t size);
