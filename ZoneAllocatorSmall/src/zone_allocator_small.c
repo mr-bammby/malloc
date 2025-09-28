@@ -55,20 +55,21 @@ void *ZoneAllocatorSmall_alloc(size_t size)
         small_alloced_cnt = 0u;
     }
     small_zone_header_t *current_header = (small_zone_header_t *)small_zone_start; // Set the current header
-    size_t aligned_size = (size + SMALL_HEADER_SIZE) / SMALL_ALLOC_ALIGMENT; // Calculate the aligned size
-    aligned_size = aligned_size * SMALL_ALLOC_ALIGMENT; // Align the size
-    aligned_size += (aligned_size % SMALL_ALLOC_ALIGMENT == 0u) ? (0u) : (SMALL_ALLOC_ALIGMENT); // Align to 16
+	size_t full_size = size + SMALL_HEADER_SIZE;
+    size_t aligned_size = full_size / SMALL_ALLOC_ALIGMENT; // Calculate the aligned size 
+    aligned_size = (full_size % SMALL_ALLOC_ALIGMENT == 0u) ? (aligned_size) : (aligned_size + 1); // Align to 16
+	aligned_size *= SMALL_ALLOC_ALIGMENT; // Align the size
     while (current_header != NULL)
     {
         if (current_header->used == 0u && current_header->size >= aligned_size)
         {
             current_header->used = size; // Mark the block as used
-            current_header->size = aligned_size; // Set the size of the block
+            current_header->size = aligned_size - SMALL_HEADER_SIZE; // Set the size of the block
             small_alloced_cnt++;
             if (current_header->size > aligned_size)
             {
                 small_zone_header_t *next_header = (small_zone_header_t *)((uint8_t *)current_header + aligned_size); // Set the next header
-                next_header->size = current_header->size - aligned_size; // Set the size of the next block
+                next_header->size = current_header->size - aligned_size - SMALL_HEADER_SIZE; // Set the size of the next block
                 next_header->used = 0u; // Set the used flag
                 next_header->next = current_header->next; // Set the next pointer
                 current_header->next = next_header; // Set the next pointer of the current block
@@ -84,7 +85,7 @@ void *ZoneAllocatorSmall_alloc(size_t size)
     return ((void *)((uint8_t *)current_header + SMALL_HEADER_SIZE)); // Return the pointer to the allocated memory
 }
 
-uint8_t ZoneAllocatorTiny_size_get(void *ptr)
+uint8_t ZoneAllocatorSmall_size_get(void *ptr)
 {
     uint8_t ret = 0;
 
@@ -92,31 +93,65 @@ uint8_t ZoneAllocatorTiny_size_get(void *ptr)
     {
         ret = 0; // Invalid pointer
     }
-    else if (ptr < tiny_zone_start || ptr > tiny_zone_end)
+    else if (ptr < small_alloced_cnt || ptr > small_zone_end)
     {
         ret = 0; // Pointer out of range
     }
-    else if (ptr == tiny_zone_map)
-    {
-        ret =  0; // Pointer is the map of the zone
-    }
     else
     {
-        uint8_t index = ((uint8_t*)ptr - (uint8_t *)tiny_zone_start) / TINY_ALLOC_SIZE; // Calculate the index of the block
-        if (index * TINY_ALLOC_SIZE + (uint8_t *)tiny_zone_start != (uint8_t *)ptr)
-        {
-            ret = 0; // Pointer not aligned
-        }
-        else
-        {
-            ret = tiny_zone_map[index]; // Return the size of the block
-        }
+		small_zone_header_t *current_header = (small_zone_header_t *)small_zone_start; // Set the current header
+		while (current_header != NULL)
+    	{
+			if (((uint8_t *)current_header + SMALL_HEADER_SIZE) == *ptr)
+			{
+				ret = current_header->size; //Found
+				break;
+			}
+			current_header = (small_zone_header_t *)current_header->next; // Move to the next block
+		}
+		if (current_header == NULL)
+		{
+			ret = 0; //Not found
+		}
     }
     return (ret);
 }
 
+static void defrag(small_zone_header_t* prev_block, small_zone_header_t *block)
+{
+	if (block != NULL)
+	{
+		small_zone_header_t* next_block = block->next;
+		size_t size = block->size;
+		small_zone_header_t* temp_block = block->next;
+
+		if (next_block != NULL)
+		{
+			if (next_block->used == 0)
+			{
+				size += next_block->used;
+				temp_block = next_block->next;
+			}
+		}
+		if (prev_block != NULL)
+		{
+			if (prev_block->used == 0);
+			{
+				size += prev_block->size;
+				prev_block->size = size;
+				prev_block->next = temp_block;
+				return;
+			}
+		}
+		block->size = size;
+		block->next = temp_block;
+		return;
+	}
+	
+}
+
 // Frees the memory block pointed to by ptr.
-short SmallAllocatorTiny_free(void *ptr)
+short SmallAllocatorSmall_free(void *ptr)
 {
     short ret = 0;
     if (ptr == NULL)
@@ -127,72 +162,134 @@ short SmallAllocatorTiny_free(void *ptr)
     {
         ret = -2; // Pointer out of range
     }
-    else
+	else
     {
-        uint8_t index = ((uint8_t*)ptr - (uint8_t *)tiny_zone_start) / TINY_ALLOC_SIZE; // Calculate the index of the block
-        if (index * TINY_ALLOC_SIZE + (uint8_t *)tiny_zone_start != (uint8_t *)ptr)
-        {
-            ret = -2; // Pointer not aligned
-        }
-        else  // Free the block
-        {
-            tiny_zone_map[index] = 0u; // Mark the block as free
-            uint8_t i;
-            for (i = 0; i < TINY_ALLOC_COUNT; i++)
-            {
-                if (tiny_zone_map[i] != 0u)
-                {
-                    break;
-                }
-            }
-            if (i == TINY_ALLOC_COUNT)
-            {
-                munmap((void *)tiny_zone_map, tiny_zone_mapped_size);
-                tiny_zone_mapped_size = 0u;
-                tiny_zone_map = NULL;
-            }
-        }
+		small_zone_header_t *current_header = (small_zone_header_t *)small_zone_start; // Set the current header
+		small_zone_header_t *prev_header = NULL;
+		while (current_header != NULL)
+    	{
+			if (((uint8_t *)current_header + SMALL_HEADER_SIZE) == *ptr)
+			{
+				current_header->size = 0; //Freed
+				small_alloced_cnt--;
+				defrag(prev_header, current_header);
+				break;
+			}
+			prev_header = current_header;
+			current_header = (small_zone_header_t *)current_header->next; // Move to the next block
+		}
+		if (small_alloced_cnt == 0u)
+		{
+			munmap((void *)small_zone_start, small_zone_mapped_size);
+			small_zone_mapped_size = 0u;
+			small_zone_start = NULL;
+		}
+		if (current_header == NULL)
+		{
+			ret = -2; //Not found
+		}
     }
     return (ret);
 }
 
-// This function only performs a realocation if the pointer is valid and the size is valid for the tiny zone.
-// It checks if the pointer is in the tiny zone.
-void *ZoneAllocatorTiny_realloc(void *ptr, size_t size)
+// This function only performs a realocation if the pointer is valid and the size is valid for the small zone.
+// It checks if the pointer is in the small zone.
+void *ZoneAllocatorSmall_realloc(void *ptr, size_t size)
 {
     void *ret = ptr;
+
     if (ptr == NULL)
     {
         ret = NULL; // Invalid pointer
     }
-    else if (ptr < tiny_zone_start || ptr > tiny_zone_end)
-    {
-        ret = NULL; // Pointer out of range
-    }
-    else if ((size == 0) || (size > TINY_ALLOC_SIZE))
+    else if ((size <= SMALL_ALLOC_SIZE_MIN) || (size > SMALL_ALLOC_SIZE_MAX))
     {
         ret =  NULL; // Invalid size
     }
-    else if (ptr < tiny_zone_start || ptr > tiny_zone_end)
+    else if (ptr < small_zone_start || ptr > small_zone_end)
     {
         ret = NULL; // Pointer out of range
     }
-    else if (ptr == tiny_zone_map)
-    {
-        ret = NULL; // Pointer is the map of the zone
-    }
     else
     {
-        uint8_t index = ((uint8_t*)ptr - (uint8_t *)tiny_zone_start) / TINY_ALLOC_SIZE; // Calculate the index of the block
-        if (index * TINY_ALLOC_SIZE + (uint8_t *)tiny_zone_start != (uint8_t *)ptr)
-        {
-            ret = NULL; // Pointer not aligned
-        }
-        else  // Free the block
-        {
-            tiny_zone_map[index] = size; // Mark the block as free
-        }
+		small_zone_header_t *current_header = (small_zone_header_t *)small_zone_start; // Set the current header
+		small_zone_header_t *prev_header = NULL;
+		while (current_header != NULL)
+    	{
+			if (((uint8_t *)current_header + SMALL_HEADER_SIZE) == *ptr)
+			{
+				size_t full_size = size + SMALL_HEADER_SIZE;
+				size_t aligned_size = full_size / SMALL_ALLOC_ALIGMENT; // Calculate the aligned size 
+				aligned_size = (full_size % SMALL_ALLOC_ALIGMENT == 0u) ? (aligned_size) : (aligned_size + 1); // Align to 16
+				aligned_size *= SMALL_ALLOC_ALIGMENT; // Align the size
+				aligned_size -= SMALL_HEADER_SIZE;
+				small_zone_header_t* next_header = block->next;
+				if (current_header->size < aligned_size)
+				{
+					if (next_header != NULL)
+					{
+						size_t new_size = next_header->size + current_header->size + SMALL_HEADER_SIZE;
+						if (new_size >= aligned_size)
+						{
+							current_header->used = size; // Mark the block as used
+            				current_header->size = aligned_size; // Set the size of the block
+							current_header->next = next_header->next;
+							if (new_size > aligned_size)
+							{
+								next_header = (small_zone_header_t *)((uint8_t *)current_header + aligned_size + SMALL_HEADER_SIZE); // Set the next header
+								next_header->size = new_size - aligned_size; // Set the size of the next block
+								next_header->next = current_header->next; // Set the next pointer
+								current_header->next = next_header; // Set the next pointer of the current block
+							}
+						}
+						else
+						{
+							current_header->size = 0; //Freed
+							small_alloced_cnt--;
+							defrag(prev_header, current_header);
+							current_header = NULL;
+						}
+					}
+				}
+				else if (current_header->size > aligned_size)
+				{
+					small_zone_header_t *temp_header = (small_zone_header_t *)((uint8_t *)current_header + aligned_size + SMALL_HEADER_SIZE); // Set the next header
+					temp_header->used = 0;
+					temp_header->next = current_header->next;
+					temp_header->size = current_header->size - aligned_size - SMALL_HEADER_SIZE;
+					if (next_header->next != NULL)
+					{
+						if (next_header->used == 0)
+						{
+							temp_header->next = next_header->next;
+							temp_header->size += next_header->size + SMALL_HEADER_SIZE;
+						}
+					}
+					current_header->next = temp_header;
+					current_header->size = aligned_size;
+					current_header->used = size;
+				}
+				else
+				{
+					current_header->used = size;
+				}
+				break;
+			}
+			prev_header = current_header;
+			current_header = (small_zone_header_t *)current_header->next; // Move to the next block
+		}
+		if (current_header == NULL)
+		{
+			ret = ZoneAllocatorSmall_alloc(size);
+		}
+		if (small_alloced_cnt == 0u)
+		{
+			munmap((void *)small_zone_start, small_zone_mapped_size);
+			small_zone_mapped_size = 0u;
+			small_zone_start = NULL;
+		}
     }
+	return ret;
 }
 
 // Converts an integer to a string in the specified base and size.
@@ -311,28 +408,31 @@ void print_size(uint8_t size)
 }
 
 
-// This function prints the memory map of the tiny zone.
+// This function prints the memory map of the small zone.
 // It prints the start address, end address, and size of each block.
-// It also prints the start address of the tiny zone.
-void ZoneAllocatorTiny_report(void)
+// It also prints the start address of the snall zone.
+void ZoneAllocatorSmall_report(void)
 {
-    if (tiny_zone_map == NULL)
+    if (small_zone_start == NULL)
     {
         return;
     }
-    write (1, "TINY : ", 6);
-    print_address_as_hex(tiny_zone_map); // Print the start address
+    write (1, "SMALL : ", 6);
+    print_address_as_hex(small_zone_start); // Print the start address
     write (1, "\n", 1);
-    for (uint8_t i = 0u; i < TINY_ALLOC_COUNT; i++)
-    {
-        if (tiny_zone_map[i] != 0u)
-        {
-            print_address_as_hex(tiny_zone_start + (i * TINY_ALLOC_SIZE)); // Print the address of the block
+	
+	small_zone_header_t *current_header = (small_zone_header_t *)small_zone_start; // Set the current header
+	while (current_header != NULL)
+	{
+		if (current_header->used != 0u)
+		{
+			print_address_as_hex(current_header + SMALL_HEADER_SIZE); // Print the address of the block
             write (1, " - ", 3);
-            print_address_as_hex(tiny_zone_start + (i * TINY_ALLOC_SIZE) + tiny_zone_map[i]); // Print the end address
+            print_address_as_hex(current_header + SMALL_HEADER_SIZE + current_header->used); // Print the end address
             write (1, " : ", 3);
-            print_size(tiny_zone_map[i]); // Print the size of the block
+            print_size(current_header->used); // Print the size of the block
             write (1, "\n", 1);
-        }
-    }
+		}
+		current_header = (small_zone_header_t *)current_header->next; // Move to the next block
+	}
 }
