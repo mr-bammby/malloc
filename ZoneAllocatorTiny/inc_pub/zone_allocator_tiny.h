@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <inttypes.h>
 
-#define TINY_ALLOC_SIZE 64u // Size of each allocation For best performance multiple of 16
+#define TINY_ALLOC_SIZE (size_t)64u // Size of each allocation For best performance multiple of 16
 
 void *ZoneAllocatorTiny_alloc(size_t size);
 short ZoneAllocatorTiny_free(void *ptr);

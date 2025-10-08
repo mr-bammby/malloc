@@ -1,10 +1,9 @@
 #include "../inc_pub/zone_allocator_small.h"
+#include "../../print_utils/inc_pub/print_utils.h"
 #include <sys/mman.h>
 #include <inttypes.h>
 #include <unistd.h>
 #include <stdio.h>
-
-
 
 typedef struct
 {
@@ -63,9 +62,6 @@ void *ZoneAllocatorSmall_alloc(size_t size)
     {
         if (current_header->used == 0u && current_header->size >= aligned_size)
         {
-            current_header->used = size; // Mark the block as used
-            current_header->size = aligned_size - SMALL_HEADER_SIZE; // Set the size of the block
-            small_alloced_cnt++;
             if (current_header->size > aligned_size)
             {
                 small_zone_header_t *next_header = (small_zone_header_t *)((uint8_t *)current_header + aligned_size); // Set the next header
@@ -74,6 +70,9 @@ void *ZoneAllocatorSmall_alloc(size_t size)
                 next_header->next = current_header->next; // Set the next pointer
                 current_header->next = next_header; // Set the next pointer of the current block
             }
+			current_header->used = size; // Mark the block as used
+            current_header->size = aligned_size - SMALL_HEADER_SIZE; // Set the size of the block
+            small_alloced_cnt++;
             break;
         }
         current_header = (small_zone_header_t *)current_header->next; // Move to the next block
@@ -93,7 +92,7 @@ uint8_t ZoneAllocatorSmall_size_get(void *ptr)
     {
         ret = 0; // Invalid pointer
     }
-    else if (ptr < small_alloced_cnt || ptr > small_zone_end)
+    else if (ptr < small_zone_start|| ptr > small_zone_end)
     {
         ret = 0; // Pointer out of range
     }
@@ -102,7 +101,7 @@ uint8_t ZoneAllocatorSmall_size_get(void *ptr)
 		small_zone_header_t *current_header = (small_zone_header_t *)small_zone_start; // Set the current header
 		while (current_header != NULL)
     	{
-			if (((uint8_t *)current_header + SMALL_HEADER_SIZE) == *ptr)
+			if ((void *)((uint8_t *)current_header + SMALL_HEADER_SIZE) == ptr)
 			{
 				ret = current_header->size; //Found
 				break;
@@ -129,13 +128,13 @@ static void defrag(small_zone_header_t* prev_block, small_zone_header_t *block)
 		{
 			if (next_block->used == 0)
 			{
-				size += next_block->used;
+				size += next_block->size;
 				temp_block = next_block->next;
 			}
 		}
 		if (prev_block != NULL)
 		{
-			if (prev_block->used == 0);
+			if (prev_block->used == 0)
 			{
 				size += prev_block->size;
 				prev_block->size = size;
@@ -151,7 +150,7 @@ static void defrag(small_zone_header_t* prev_block, small_zone_header_t *block)
 }
 
 // Frees the memory block pointed to by ptr.
-short SmallAllocatorSmall_free(void *ptr)
+short ZoneAllocatorSmall_free(void *ptr)
 {
     short ret = 0;
     if (ptr == NULL)
@@ -168,9 +167,9 @@ short SmallAllocatorSmall_free(void *ptr)
 		small_zone_header_t *prev_header = NULL;
 		while (current_header != NULL)
     	{
-			if (((uint8_t *)current_header + SMALL_HEADER_SIZE) == *ptr)
+			if ((void *)((uint8_t *)current_header + SMALL_HEADER_SIZE) == ptr)
 			{
-				current_header->size = 0; //Freed
+				current_header->used = 0; //Freed
 				small_alloced_cnt--;
 				defrag(prev_header, current_header);
 				break;
@@ -216,14 +215,14 @@ void *ZoneAllocatorSmall_realloc(void *ptr, size_t size)
 		small_zone_header_t *prev_header = NULL;
 		while (current_header != NULL)
     	{
-			if (((uint8_t *)current_header + SMALL_HEADER_SIZE) == *ptr)
+			if ((void *)((uint8_t *)current_header + SMALL_HEADER_SIZE) == ptr)
 			{
 				size_t full_size = size + SMALL_HEADER_SIZE;
 				size_t aligned_size = full_size / SMALL_ALLOC_ALIGMENT; // Calculate the aligned size 
 				aligned_size = (full_size % SMALL_ALLOC_ALIGMENT == 0u) ? (aligned_size) : (aligned_size + 1); // Align to 16
 				aligned_size *= SMALL_ALLOC_ALIGMENT; // Align the size
 				aligned_size -= SMALL_HEADER_SIZE;
-				small_zone_header_t* next_header = block->next;
+				small_zone_header_t* next_header = current_header->next;
 				if (current_header->size < aligned_size)
 				{
 					if (next_header != NULL)
@@ -244,7 +243,7 @@ void *ZoneAllocatorSmall_realloc(void *ptr, size_t size)
 						}
 						else
 						{
-							current_header->size = 0; //Freed
+							current_header->used = 0; //Freed
 							small_alloced_cnt--;
 							defrag(prev_header, current_header);
 							current_header = NULL;
@@ -292,122 +291,6 @@ void *ZoneAllocatorSmall_realloc(void *ptr, size_t size)
 	return ret;
 }
 
-// Converts an integer to a string in the specified base and size.
-// It takes a number, a base, and a buffer to store the result.
-// It returns the buffer containing the string representation of the number.
-char *itoa(uint8_t num, int base, char *buffer)
-{
-    if (base < 2 || base > 16)
-    {
-        return NULL; // Invalid base
-    }
-
-    char *num_str = buffer; // Use the provided buffer 
-    int i = 0;
-    int j = 0;
-    int temp = num;
-    while (temp != 0)
-    {
-        int remainder = temp % base;
-        if (remainder < 10)
-        {
-            num_str[i++] = '0' + remainder; // Convert to character
-        }
-        else
-        {
-            num_str[i++] = 'A' + (remainder - 10); // Convert to character
-        }
-        temp /= base;
-    }
-    num_str[i] = '\0'; // Null-terminate the string
-    // Reverse the string
-    for (j = 0; j < i / 2; j++)
-    {
-        char temp = num_str[j];
-        num_str[j] = num_str[i - j - 1];
-        num_str[i - j - 1] = temp;
-    }
-    return num_str; // Return the string
-}
-
-
-// This function converts an integer to a string in the specified base.
-// It takes a number, a base, a size, and a buffer to store the result.
-// It returns the buffer containing the string representation of the number.
-// The function fills the buffer with leading zeros if the size is greater than the number of digits.
-// The function also reverses the string to get the correct order.
-char *itoa_size(uint8_t num, int base, int size, char *buffer)
-{
-    if (base < 2 || base > 16)
-    {
-        return NULL; // Invalid base
-    }
-    if (size <= 0)
-    {
-        return NULL; // Invalid size
-    }
-
-    char *num_str = buffer; // Use the provided buffer 
-    int i = 0;
-    int j = 0;
-    int temp = num;
-    while (temp != 0)
-    {
-        int remainder = temp % base;
-        if (remainder < 10)
-        {
-            num_str[i++] = '0' + remainder; // Convert to character
-        }
-        else
-        {
-            num_str[i++] = 'A' + (remainder - 10); // Convert to character
-        }
-        temp /= base;
-    }
-    while (i < size)
-    {
-        num_str[i++] = '0'; // Fill with zeros
-    }
-    num_str[i] = '\0'; // Null-terminate the string
-    // Reverse the string
-    for (j = 0; j < i / 2; j++)
-    {
-        char temp = num_str[j];
-        num_str[j] = num_str[i - j - 1];
-        num_str[i - j - 1] = temp;
-    }
-    return num_str; // Return the string
-}
-
-// This function prints the address of the pointer in hexadecimal format.
-// It converts the address to a string and prints it.
-void print_address_as_hex(void *ptr)
-{
-    char num_str[5]; // Buffer to hold the hex string
-    unsigned long address = (unsigned long)ptr;
-    itoa_size(address, 16, 4, num_str); // Convert address to hex string
-    write (1, "0x", 2); // Print the prefix
-    write (1, num_str, 4); // Print the address
-}
-
-// This function prints the size of the block in bytes.
-// It converts the size to a string and prints it.
-void print_size(uint8_t size)
-{
-    char num_str[50]; // Buffer to hold the hex string
-    itoa(size, 10, num_str); // Convert size to string
-    for (int i = 0; i < 50; i++)
-    {
-        if (num_str[i] == '\0')
-        {
-            break; // End of string
-        }
-        write (1, &num_str[i], 1); // Print the address
-    }
-    write (1, " bytes", 6); // Print a new line
-}
-
-
 // This function prints the memory map of the small zone.
 // It prints the start address, end address, and size of each block.
 // It also prints the start address of the snall zone.
@@ -418,7 +301,7 @@ void ZoneAllocatorSmall_report(void)
         return;
     }
     write (1, "SMALL : ", 6);
-    print_address_as_hex(small_zone_start); // Print the start address
+    print_address_as_hex((size_t)small_zone_start); // Print the start address
     write (1, "\n", 1);
 	
 	small_zone_header_t *current_header = (small_zone_header_t *)small_zone_start; // Set the current header
@@ -426,9 +309,9 @@ void ZoneAllocatorSmall_report(void)
 	{
 		if (current_header->used != 0u)
 		{
-			print_address_as_hex(current_header + SMALL_HEADER_SIZE); // Print the address of the block
+			print_address_as_hex((size_t)current_header + SMALL_HEADER_SIZE); // Print the address of the block
             write (1, " - ", 3);
-            print_address_as_hex(current_header + SMALL_HEADER_SIZE + current_header->used); // Print the end address
+            print_address_as_hex((size_t)current_header + SMALL_HEADER_SIZE + current_header->used); // Print the end address
             write (1, " : ", 3);
             print_size(current_header->used); // Print the size of the block
             write (1, "\n", 1);
