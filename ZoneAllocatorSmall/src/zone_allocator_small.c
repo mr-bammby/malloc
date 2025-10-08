@@ -301,7 +301,7 @@ void ZoneAllocatorSmall_report(void)
         return;
     }
     write (1, "SMALL : ", 6);
-    print_address_as_hex((size_t)small_zone_start); // Print the start address
+    print_address_as_hex((void *)small_zone_start); // Print the start address
     write (1, "\n", 1);
 	
 	small_zone_header_t *current_header = (small_zone_header_t *)small_zone_start; // Set the current header
@@ -309,9 +309,9 @@ void ZoneAllocatorSmall_report(void)
 	{
 		if (current_header->used != 0u)
 		{
-			print_address_as_hex((size_t)current_header + SMALL_HEADER_SIZE); // Print the address of the block
+			print_address_as_hex((void *)((uint8_t *)current_header + SMALL_HEADER_SIZE)); // Print the address of the block
             write (1, " - ", 3);
-            print_address_as_hex((size_t)current_header + SMALL_HEADER_SIZE + current_header->used); // Print the end address
+            print_address_as_hex((void *)((uint8_t *)current_header + SMALL_HEADER_SIZE + current_header->used)); // Print the end address
             write (1, " : ", 3);
             print_size(current_header->used); // Print the size of the block
             write (1, "\n", 1);

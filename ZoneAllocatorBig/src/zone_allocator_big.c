@@ -421,7 +421,7 @@ void ZoneAllocatorBig_report(void)
 	big_block_header_t *current_block;
 	while  (current_map != NULL)
 	{
-		print_address_as_hex((size_t)current_map); // Print the start address of map
+		print_address_as_hex((void *)current_map); // Print the start address of map
 		write (1, "\n", 1);
 
 		current_block = current_map->first_block; // Set the current block
@@ -429,9 +429,9 @@ void ZoneAllocatorBig_report(void)
 		{
 			if (current_block->used != 0u)
 			{
-				print_address_as_hex((size_t)current_block + BIG_BLOCK_HEADER_SIZE); // Print the address of the block
+				print_address_as_hex((void *)((uint8_t *)current_block + BIG_BLOCK_HEADER_SIZE)); //Print the address of the block
 				write (1, " - ", 3);
-				print_address_as_hex((size_t)current_block + BIG_BLOCK_HEADER_SIZE + current_block->used); // Print the end address
+				print_address_as_hex((void *)((uint8_t *)current_block + BIG_BLOCK_HEADER_SIZE + current_block->used)); //Print the end address
 				write (1, " : ", 3);
 				print_size(current_block->used); // Print the size of the block
 				write (1, "\n", 1);
