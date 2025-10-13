@@ -10,15 +10,20 @@ void *ft_malloc(size_t size)
     if (size <= TINY_ALLOC_SIZE)
     {
         ptr = ZoneAllocatorTiny_alloc(size);
+        if (ptr != NULL)
+        {
+            return (ptr);
+        }   
     }
     
-    else if (size <= SMALL_ALLOC_SIZE_MAX)
+    if (size <= SMALL_ALLOC_SIZE_MAX)
     {
         ptr = ZoneAllocatorSmall_alloc(size);
+        if (ptr != NULL)
+        {
+            return (ptr);
+        }  
     }
-    else
-    {
-        ptr = ZoneAllocatorBig_alloc(size);
-    }
-    return ptr;
+
+    return (ZoneAllocatorBig_alloc(size));
 }

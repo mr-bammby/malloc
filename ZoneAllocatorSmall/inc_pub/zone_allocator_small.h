@@ -9,8 +9,9 @@
 
 void *ZoneAllocatorSmall_alloc(size_t size);
 short ZoneAllocatorSmall_free(void *ptr);
-void *ZoneAllocatorSmall_realloc(void *ptr, size_t size);
+short ZoneAllocatorSmall_realloc(void **ptr, size_t size);
 
+size_t ZoneAllocatorSmall_size_get(void *ptr);
 void ZoneAllocatorSmall_report(void);
 
 

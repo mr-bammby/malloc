@@ -18,6 +18,11 @@ size_t tiny_alloced_cnt;
 // Allocates a block of memory of the given size.
 void *ZoneAllocatorTiny_alloc(size_t size)
 {
+    if (size == 0)
+    {
+        return (0);
+    }
+
     if (tiny_zone_map == NULL)
     {
         int page_size = sysconf(_SC_PAGESIZE) ; // Get the page size
@@ -41,16 +46,17 @@ void *ZoneAllocatorTiny_alloc(size_t size)
         {
             tiny_zone_map[i] = size; // Mark the block as used
             tiny_alloced_cnt++;
-            return (tiny_zone_start + (i * TINY_ALLOC_SIZE)); // Return the pointer to the allocated memory
+            void * ret = (void *)((uint8_t *)tiny_zone_start + ((size_t)i * TINY_ALLOC_SIZE));
+            return ((void *)((uint8_t *)tiny_zone_start + ((size_t)i * TINY_ALLOC_SIZE))); // Return the pointer to the allocated memory
         }
     }
 
     return (NULL);
 }
 
-uint8_t ZoneAllocatorTiny_size_get(void *ptr)
+size_t ZoneAllocatorTiny_size_get(void *ptr)
 {
-    uint8_t ret = 0;
+    size_t ret = 0;
 
     if (ptr == NULL)
     {
@@ -115,41 +121,37 @@ short ZoneAllocatorTiny_free(void *ptr)
 
 // This function only performs a realocation if the pointer is valid and the size is valid for the tiny zone.
 // It checks if the pointer is in the tiny zone.
-void *ZoneAllocatorTiny_realloc(void *ptr, size_t size)
+short ZoneAllocatorTiny_realloc(void **ptr, size_t size)
 {
-    void *ret = ptr;
+    short ret = -1;
+
     if (ptr == NULL)
     {
-        ret = NULL; // Invalid pointer
+        *ptr = NULL; // Invalid pointer
     }
-    else if (ptr < tiny_zone_start || ptr > tiny_zone_end)
+    else if (*ptr < tiny_zone_start || *ptr > tiny_zone_end)
     {
-        ret = NULL; // Pointer out of range
+        *ptr = NULL; // Pointer out of range
     }
     else if ((size == 0) || (size > TINY_ALLOC_SIZE))
     {
-        ret =  NULL; // Invalid size
-    }
-    else if (ptr < tiny_zone_start || ptr > tiny_zone_end)
-    {
-        ret = NULL; // Pointer out of range
-    }
-    else if (ptr == tiny_zone_map)
-    {
-        ret = NULL; // Pointer is the map of the zone
+        ret = ZoneAllocatorTiny_free(*ptr);
+        *ptr =  NULL; // Invalid size
     }
     else
     {
-        uint8_t index = ((uint8_t*)ptr - (uint8_t *)tiny_zone_start) / TINY_ALLOC_SIZE; // Calculate the index of the block
-        if (index * TINY_ALLOC_SIZE + (uint8_t *)tiny_zone_start != (uint8_t *)ptr)
+        uint8_t index = ((uint8_t*)*ptr - (uint8_t *)tiny_zone_start) / TINY_ALLOC_SIZE; // Calculate the index of the block
+        if (index * TINY_ALLOC_SIZE + (uint8_t *)tiny_zone_start != (uint8_t *)*ptr)
         {
-            ret = NULL; // Pointer not aligned
+            *ptr = NULL; // Pointer not aligned
         }
-        else  // Free the block
+        else 
         {
-            tiny_zone_map[index] = size; // Mark the block as free
+            ret = 0;
+            tiny_zone_map[index] = size;
         }
     }
+    return (ret);
 }
 
 // This function prints the memory map of the tiny zone.

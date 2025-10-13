@@ -32,7 +32,7 @@ void *ZoneAllocatorSmall_alloc(size_t size)
     small_zone_header_t *start_header;
 
 
-    if (size < SMALL_ALLOC_SIZE_MIN || size > SMALL_ALLOC_SIZE_MAX)
+    if (size == 0 || size > SMALL_ALLOC_SIZE_MAX)
     {
         return NULL; // Invalid size
     }
@@ -84,9 +84,9 @@ void *ZoneAllocatorSmall_alloc(size_t size)
     return ((void *)((uint8_t *)current_header + SMALL_HEADER_SIZE)); // Return the pointer to the allocated memory
 }
 
-uint8_t ZoneAllocatorSmall_size_get(void *ptr)
+size_t ZoneAllocatorSmall_size_get(void *ptr)
 {
-    uint8_t ret = 0;
+    size_t ret = 0;
 
     if (ptr == NULL)
     {
@@ -182,6 +182,7 @@ short ZoneAllocatorSmall_free(void *ptr)
 			munmap((void *)small_zone_start, small_zone_mapped_size);
 			small_zone_mapped_size = 0u;
 			small_zone_start = NULL;
+			small_zone_end = NULL;
 		}
 		if (current_header == NULL)
 		{
@@ -193,21 +194,22 @@ short ZoneAllocatorSmall_free(void *ptr)
 
 // This function only performs a realocation if the pointer is valid and the size is valid for the small zone.
 // It checks if the pointer is in the small zone.
-void *ZoneAllocatorSmall_realloc(void *ptr, size_t size)
+short ZoneAllocatorSmall_realloc(void **ptr, size_t size)
 {
-    void *ret = ptr;
+	short ret = -1;
 
-    if (ptr == NULL)
+    if (*ptr == NULL)
     {
-        ret = NULL; // Invalid pointer
+        *ptr = NULL; // Invalid pointer
     }
-    else if ((size <= SMALL_ALLOC_SIZE_MIN) || (size > SMALL_ALLOC_SIZE_MAX))
+    else if ((size == 0) || (size > SMALL_ALLOC_SIZE_MAX))
     {
-        ret =  NULL; // Invalid size
+		ret = ZoneAllocatorSmall_free(*ptr);
+        *ptr =  NULL; // Invalid size
     }
-    else if (ptr < small_zone_start || ptr > small_zone_end)
+    else if (*ptr < small_zone_start || *ptr > small_zone_end)
     {
-        ret = NULL; // Pointer out of range
+        *ptr = NULL; // Pointer out of range
     }
     else
     {
@@ -215,19 +217,21 @@ void *ZoneAllocatorSmall_realloc(void *ptr, size_t size)
 		small_zone_header_t *prev_header = NULL;
 		while (current_header != NULL)
     	{
-			if ((void *)((uint8_t *)current_header + SMALL_HEADER_SIZE) == ptr)
+			if ((void *)((uint8_t *)current_header + SMALL_HEADER_SIZE) == *ptr)
 			{
 				size_t full_size = size + SMALL_HEADER_SIZE;
 				size_t aligned_size = full_size / SMALL_ALLOC_ALIGMENT; // Calculate the aligned size 
 				aligned_size = (full_size % SMALL_ALLOC_ALIGMENT == 0u) ? (aligned_size) : (aligned_size + 1); // Align to 16
 				aligned_size *= SMALL_ALLOC_ALIGMENT; // Align the size
 				aligned_size -= SMALL_HEADER_SIZE;
-				small_zone_header_t* next_header = current_header->next;
 				if (current_header->size < aligned_size)
 				{
+					small_zone_header_t* next_header = current_header->next;
 					if (next_header != NULL)
 					{
-						size_t new_size = next_header->size + current_header->size + SMALL_HEADER_SIZE;
+						
+						size_t new_size = (next_header->used == 0u) ? (next_header->size) : 0u;
+						new_size += (current_header->size  + SMALL_HEADER_SIZE);
 						if (new_size >= aligned_size)
 						{
 							current_header->used = size; // Mark the block as used
@@ -240,38 +244,20 @@ void *ZoneAllocatorSmall_realloc(void *ptr, size_t size)
 								next_header->next = current_header->next; // Set the next pointer
 								current_header->next = next_header; // Set the next pointer of the current block
 							}
-						}
-						else
-						{
-							current_header->used = 0; //Freed
-							small_alloced_cnt--;
-							defrag(prev_header, current_header);
-							current_header = NULL;
+							return (0);
 						}
 					}
-				}
-				else if (current_header->size > aligned_size)
-				{
-					small_zone_header_t *temp_header = (small_zone_header_t *)((uint8_t *)current_header + aligned_size + SMALL_HEADER_SIZE); // Set the next header
-					temp_header->used = 0;
-					temp_header->next = current_header->next;
-					temp_header->size = current_header->size - aligned_size - SMALL_HEADER_SIZE;
-					if (next_header->next != NULL)
-					{
-						if (next_header->used == 0)
-						{
-							temp_header->next = next_header->next;
-							temp_header->size += next_header->size + SMALL_HEADER_SIZE;
-						}
-					}
-					current_header->next = temp_header;
-					current_header->size = aligned_size;
-					current_header->used = size;
+					current_header->used = 0; //Freed
+					small_alloced_cnt--;
+					defrag(prev_header, current_header);
+					current_header = NULL;
 				}
 				else
 				{
 					current_header->used = size;
+					return (0);
 				}
+				
 				break;
 			}
 			prev_header = current_header;
@@ -279,7 +265,8 @@ void *ZoneAllocatorSmall_realloc(void *ptr, size_t size)
 		}
 		if (current_header == NULL)
 		{
-			ret = ZoneAllocatorSmall_alloc(size);
+			*ptr = ZoneAllocatorSmall_alloc(size);
+			ret = 0;
 		}
 		if (small_alloced_cnt == 0u)
 		{
@@ -288,7 +275,7 @@ void *ZoneAllocatorSmall_realloc(void *ptr, size_t size)
 			small_zone_start = NULL;
 		}
     }
-	return ret;
+	return (ret);
 }
 
 // This function prints the memory map of the small zone.

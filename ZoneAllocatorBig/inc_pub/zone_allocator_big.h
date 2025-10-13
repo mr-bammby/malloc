@@ -9,6 +9,7 @@ void *ZoneAllocatorBig_alloc(size_t size);
 short ZoneAllocatorBig_free(void *ptr);
 void *ZoneAllocatorBig_realloc(void *ptr, size_t size);
 
+size_t ZoneAllocatorBig_size_get(void *ptr);
 void ZoneAllocatorBig_report(void);
 
 

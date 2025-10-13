@@ -39,9 +39,9 @@ static size_t new_map_add(big_map_header_t **new_map, size_t map_size)
 	size_t aligned_size;
 
 	*new_map = mmap(NULL, map_size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
-	(*new_map)->next = NULL;
-	(*new_map)->cnt = 1;
-	(*new_map)->size = map_size;
+	(*new_map)-> next = NULL;
+	(*new_map)-> cnt = 1;
+	(*new_map)-> size = map_size;
 	big_zone_end = *new_map;
 
 	aligned_size = BIG_MAP_HEADER_SIZE / BIG_ALLOC_ALIGMENT;
@@ -97,15 +97,14 @@ static void *old_map_alloc(size_t size)
 				aligned_size = full_size / BIG_ALLOC_ALIGMENT;
 				aligned_size = (full_size % BIG_ALLOC_ALIGMENT == 0) ? (aligned_size) : (aligned_size + 1);
 				aligned_size *= BIG_ALLOC_ALIGMENT;
-				aligned_size -= BIG_BLOCK_HEADER_SIZE;
-				if ((current_block->size - aligned_size) > (2 * BIG_BLOCK_HEADER_SIZE))
+				if ((current_block->size - aligned_size) > (BIG_BLOCK_HEADER_SIZE))
 				{
-					new_block = (void *)current_block + aligned_size + BIG_BLOCK_HEADER_SIZE;
+					new_block = (void *)current_block + aligned_size;
 					new_block->next = current_block->next;
 					current_block->next = new_block;
-					new_block->size = current_block->size - aligned_size - BIG_BLOCK_HEADER_SIZE;
+					new_block->size = current_block->size - (aligned_size + BIG_BLOCK_HEADER_SIZE);
 					new_block->used = 0;
-					current_block->size = aligned_size;
+					current_block->size = aligned_size - BIG_BLOCK_HEADER_SIZE;
 				}
 				ret = (void *)current_block + BIG_BLOCK_HEADER_SIZE;
 				current_map->cnt++;
@@ -132,6 +131,11 @@ void *ZoneAllocatorBig_alloc(size_t size)
 	const size_t full_size = size + BIG_BLOCK_HEADER_SIZE + BIG_MAP_HEADER_SIZE;
 	size_t aligned_size, map_size = 0;
 	void * ret = NULL;
+
+	if (size == 0)
+	{
+		return (ret);
+	}
 
 	if (full_size > (BIG_MAP_MIN_ALLOC * page_size))
 	{
@@ -164,9 +168,9 @@ void *ZoneAllocatorBig_alloc(size_t size)
     return (ret);
 }
 
-uint8_t ZoneAllocatorBig_size_get(void *ptr)
+size_t ZoneAllocatorBig_size_get(void *ptr)
 {
-    uint8_t ret = 0;
+    size_t ret = 0;
 
     if (ptr == NULL)
     {
@@ -256,12 +260,23 @@ short ZoneAllocatorBig_free(void *ptr)
 			{
 				if (((void *)current_block + BIG_BLOCK_HEADER_SIZE) == ptr)
 				{
-					current_block->size = 0; //Freed
+					current_block->used = 0; //Freed
 					current_map->cnt--;
 					if(current_map->cnt == 0)
-					{
+					{	
+						if (prev_map == NULL)
+						{
+							big_zone_start = current_map->next;
+						}
+						else
+						{
+							prev_map->next = current_map->next;
+						}
+						if (current_map->next == NULL)
+						{
+							big_zone_end = prev_map;
+						}
 						munmap((void *)current_map, current_map->size);
-						prev_map->next = current_map->next;
 					}
 					else
 					{
@@ -297,8 +312,9 @@ void *ZoneAllocatorBig_realloc(void *ptr, size_t size)
 	{
 		ret = NULL; // Invalid pointer
 	}
-	else if (size <= BIG_ALLOC_SIZE_MIN)
+	else if (size == 0)
 	{
+		ZoneAllocatorBig_free(ptr);
 		ret = NULL; // Invalid size
 	}
 	else
@@ -342,12 +358,23 @@ void *ZoneAllocatorBig_realloc(void *ptr, size_t size)
 							}
 							else
 							{
-								current_block->size = 0; //Freed
+								current_block->used = 0; //Freed
 								current_map->cnt--;
 								if(current_map->cnt == 0)
 								{
+									if (prev_map == NULL)
+									{
+										big_zone_start = current_map->next;
+									}
+									else
+									{
+										prev_map->next = current_map->next;
+									}
+									if (current_map->next == NULL)
+									{
+										big_zone_end = prev_map;
+									}
 									munmap((void *)current_map, current_map->size);
-									prev_map->next = current_map->next;
 								}
 								else
 								{
@@ -359,12 +386,23 @@ void *ZoneAllocatorBig_realloc(void *ptr, size_t size)
 						}
 						else
 						{
-							current_block->size = 0; //Freed
+							current_block->used = 0; //Freed
 							current_map->cnt--;
 							if(current_map->cnt == 0)
 							{
+								if (prev_map == NULL)
+								{
+									big_zone_start = current_map->next;
+								}
+								else
+								{
+									prev_map->next = current_map->next;
+								}
+								if (current_map->next == NULL)
+								{
+									big_zone_end = prev_map;
+								}
 								munmap((void *)current_map, current_map->size);
-								prev_map->next = current_map->next;
 							}
 							else
 							{
@@ -372,15 +410,6 @@ void *ZoneAllocatorBig_realloc(void *ptr, size_t size)
 							}
 							ret = ZoneAllocatorBig_alloc(size);
 						}
-					}
-					else if ((current_block->size - aligned_size) > BIG_BLOCK_HEADER_SIZE)
-					{
-						current_block->next = (void *)current_block + aligned_size;
-						current_block->next->next = next_block->next;
-						current_block->next->used = 0;
-						current_block->next->size = current_block->size - aligned_size - BIG_BLOCK_HEADER_SIZE;
-						current_block->used = size;
-						current_block->size = aligned_size;
 					}
 					else
 					{
