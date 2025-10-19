@@ -80,47 +80,49 @@ static void *new_map_alloc(size_t size, size_t map_size, size_t free_map_size)
 
 static void *old_map_alloc(size_t size)
 {
-	big_map_header_t *current_map = big_zone_start;
-	big_block_header_t *current_block, *new_block;
-	size_t aligned_size, full_size;
-	void *ret = NULL;
+    big_map_header_t *current_map = big_zone_start;
+    big_block_header_t *current_block, *new_block;
+    size_t full_size, aligned_size, required, diff;
+    void *ret = NULL;
 
-	while (current_map != NULL)
-	{
-		current_block = current_map->first_block;
-		while (current_block != NULL)
-		{
-			if ((current_block->used == 0) && (current_block->size >= size))
-			{
-				current_block->used = size;
-				full_size = size + BIG_BLOCK_HEADER_SIZE;
-				aligned_size = full_size / BIG_ALLOC_ALIGMENT;
-				aligned_size = (full_size % BIG_ALLOC_ALIGMENT == 0) ? (aligned_size) : (aligned_size + 1);
-				aligned_size *= BIG_ALLOC_ALIGMENT;
-				if ((current_block->size - aligned_size) > (BIG_BLOCK_HEADER_SIZE))
-				{
-					new_block = (void *)current_block + aligned_size;
-					new_block->next = current_block->next;
-					current_block->next = new_block;
-					new_block->size = current_block->size - (aligned_size + BIG_BLOCK_HEADER_SIZE);
-					new_block->used = 0;
-					current_block->size = aligned_size - BIG_BLOCK_HEADER_SIZE;
-				}
-				ret = (void *)current_block + BIG_BLOCK_HEADER_SIZE;
-				current_map->cnt++;
-				break;
-			}
-			current_block = current_block->next;
-		}
-		if (ret != NULL)
-		{
-			break;
-		}
-		current_map = current_map->next;
-	}
-	return (ret);
+    full_size = size + BIG_BLOCK_HEADER_SIZE;
+    aligned_size = full_size / BIG_ALLOC_ALIGMENT;
+    aligned_size = (full_size % BIG_ALLOC_ALIGMENT == 0) ? aligned_size : (aligned_size + 1);
+    aligned_size *= BIG_ALLOC_ALIGMENT;  // A
+    required = aligned_size - BIG_BLOCK_HEADER_SIZE;  // Needed data size
+
+    while (current_map != NULL)
+    {
+        current_block = current_map->first_block;
+        while (current_block != NULL)
+        {
+            if ((current_block->used == 0) && (current_block->size >= required))
+            {
+                current_block->used = size;
+                diff = current_block->size - required;
+                if (diff > 2 * BIG_BLOCK_HEADER_SIZE)
+                {
+                    new_block = (void *)((uint8_t *)current_block + aligned_size);
+                    new_block->next = current_block->next;
+                    current_block->next = new_block;
+                    new_block->size = diff - BIG_BLOCK_HEADER_SIZE;  // Now correct: (D - A + H) - H = D - A
+                    new_block->used = 0;
+                    current_block->size = required;
+                }
+                ret = (void *)current_block + BIG_BLOCK_HEADER_SIZE;
+                current_map->cnt++;
+                break;
+            }
+            current_block = current_block->next;
+        }
+        if (ret != NULL)
+        {
+            break;
+        }
+        current_map = current_map->next;
+    }
+    return (ret);
 }
-
 
 
 // Allocates a block of memory of the given size.
@@ -215,7 +217,7 @@ static void defrag(big_block_header_t* prev_block, big_block_header_t *block)
 		{
 			if (next_block->used == 0)
 			{
-				size += next_block->used;
+				size += next_block->size;
 				size += BIG_BLOCK_HEADER_SIZE;
 				temp_block = next_block->next;
 			}
@@ -334,27 +336,29 @@ void *ZoneAllocatorBig_realloc(void *ptr, size_t size)
 					size_t aligned_size = (size + BIG_BLOCK_HEADER_SIZE) / BIG_ALLOC_ALIGMENT; // Calculate the aligned size
 					aligned_size = aligned_size * BIG_ALLOC_ALIGMENT; // Align the size
 					aligned_size += (aligned_size % BIG_ALLOC_ALIGMENT == 0u) ? (0u) : (BIG_ALLOC_ALIGMENT); // Align to 16
-					aligned_size -= BIG_BLOCK_HEADER_SIZE;
 					big_block_header_t* next_block = current_block->next;
-					if (current_block->size < aligned_size)
+					if (current_block->size < size)
 					{
 						if ((next_block != NULL)) 
 						{
-							size_t max_size = current_block->size + next_block->size + BIG_BLOCK_HEADER_SIZE;
+							size_t max_size = current_block->size + next_block->size + 2 * BIG_BLOCK_HEADER_SIZE;
 							if (max_size > aligned_size)
 							{
-								current_block->next = (void *)current_block + aligned_size;
-								current_block->next->next = next_block->next;
-								current_block->next->used = 0;
-								current_block->next->size = max_size - aligned_size - BIG_BLOCK_HEADER_SIZE;
 								current_block->used = size;
-								current_block->size = aligned_size;
-							}
-							else if (max_size == aligned_size)
-							{	
-								current_block->next = next_block->next;
-								current_block->used = size;
-								current_block->size = aligned_size;
+								size_t size_diff = max_size  - aligned_size;
+								if (size_diff > (2 * BIG_BLOCK_HEADER_SIZE))
+								{
+									current_block->next = (void *)((uint8_t *)current_block + aligned_size);
+									current_block->next->next = next_block->next;
+									current_block->next->used = 0;
+									current_block->next->size = size_diff - BIG_BLOCK_HEADER_SIZE;
+								}
+								else
+								{
+									current_block->next = next_block->next;
+								}
+								
+								current_block->size = aligned_size - BIG_BLOCK_HEADER_SIZE;
 							}
 							else
 							{
