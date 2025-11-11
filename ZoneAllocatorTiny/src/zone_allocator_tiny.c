@@ -5,9 +5,9 @@
 #include <unistd.h>
 #include <stdio.h>
 
-#define TINY_ALLOC_COUNT 100u // Number of allocations
+#define TINY_ALLOC_COUNT 125u // Number of allocations
 #define TINY_ZONE_SIZE (TINY_ALLOC_SIZE * TINY_ALLOC_COUNT) + TINY_ALLOC_COUNT  // Total size of the tiny zone
-#define TINY_ALLOC_ALIGMENT 16u // Alignment of the tiny allocation
+#define TINY_ALLOC_ALIGMENT 8u // Alignment of the tiny allocation
 
 uint8_t *tiny_zone_map = NULL; // Pointer to the tiny zone
 void *tiny_zone_start = NULL; // Pointer to the tiny zone
