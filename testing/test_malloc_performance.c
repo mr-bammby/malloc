@@ -1,7 +1,7 @@
 #include "../main/inc_pub/malloc.h"
 #include "../ZoneAllocatorTiny/inc_pub/zone_allocator_tiny.h"
 #include "../ZoneAllocatorSmall/inc_pub/zone_allocator_small.h"
-#include "../ZoneAllocatorBig/inc_pub/zone_allocator_big.h"
+#include "../ZoneAllocatorBig/inc_pub/zone_allocator_large.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

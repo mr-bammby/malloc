@@ -74,6 +74,13 @@ typedef struct large_manager_s
     size_t large_alloc_cnt;
 } large_manager_t;
 
+typedef struct realloc_hlp_s
+{
+    void* mem;
+    size_t mem_size;
+    alloc_manager_e manager;
+} realloc_hlp_t;
+
 
 typedef struct alloc_manager_s
 {
@@ -84,6 +91,7 @@ typedef struct alloc_manager_s
     uint8_t small_set;
     uint8_t large_set;
     size_t size;
+    realloc_hlp_t realloc_hlp;
 } alloc_manager_t;
 
 extern alloc_manager_t *alloc_manager;
@@ -93,7 +101,6 @@ void AllocManager_uninit(alloc_manager_e manager);
 short is_mmap_safe(size_t size);
 
 #ifdef FT_BONUS
-#include <pthread.h>
 extern pthread_mutex_t alloc_mutex;
 #endif /* FT_BONUS */
 

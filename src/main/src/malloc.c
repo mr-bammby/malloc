@@ -6,15 +6,15 @@
 #endif /* FT_BONUS */
 #include <stddef.h>
 
-void *ft_malloc(size_t size)
+void *no_block_malloc(size_t size)
 {
-    
     void *ptr = NULL;
-    
-    #ifdef FT_BONUS
-    pthread_mutex_lock(&alloc_mutex);
-    #endif /* FT_BONUS */
-    if (size <= TINY_ALLOC_SIZE)
+
+    if (size == 0)
+    {
+        ptr = NULL;
+    }
+    else if (size <= TINY_ALLOC_SIZE)
     {
         ptr = ZoneAllocatorTiny_alloc(size);
     }
@@ -26,6 +26,19 @@ void *ft_malloc(size_t size)
     {
         ptr = ZoneAllocatorLarge_alloc(size);
     }
+
+    return (ptr);
+}
+
+void *ft_malloc(size_t size)
+{
+    
+    void *ptr = NULL;
+    
+    #ifdef FT_BONUS
+    pthread_mutex_lock(&alloc_mutex);
+    #endif /* FT_BONUS */
+    ptr = no_block_malloc(size);
     #ifdef FT_BONUS
     pthread_mutex_unlock(&alloc_mutex);
     #endif /* FT_BONUS */

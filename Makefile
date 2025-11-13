@@ -17,6 +17,7 @@ SRCS = $(SRCD)main/src/alloc_manager.c \
        $(SRCD)main/src/free.c \
        $(SRCD)main/src/malloc.c \
        $(SRCD)main/src/realloc.c \
+	   $(SRCD)main/src/show_alloc_mem.c \
        $(SRCD)print_utils/src/print_utils.c \
        $(SRCD)ZoneAllocatorLarge/src/zone_allocator_large.c \
        $(SRCD)ZoneAllocatorSmall/src/zone_allocator_small.c \
@@ -27,6 +28,7 @@ OBJS       := $(patsubst $(SRCD)%.c,$(OBJD)%.o,$(SRCS))
 BONUS_OBJS := $(patsubst $(SRCD)%.c,$(BONUS_OBJD)%.o,$(SRCS))
 
 INCLUDES = -I $(SRCD)main/inc_pub \
+		   -I $(SRCD)main/inc_priv \
            -I $(SRCD)print_utils/inc_pub \
            -I $(SRCD)ZoneAllocatorLarge/inc_pub \
            -I $(SRCD)ZoneAllocatorSmall/inc_pub \
@@ -36,6 +38,7 @@ CC       = gcc
 CFLAGS   = -Wall -Wextra -Werror -fPIC $(INCLUDES)
 LDFLAGS  = -shared
 LDVER    = -Wl,--version-script=$(VERSION_SCRIPT)
+
 
 # Default target
 all: $(NAME) $(SYM_LINK)

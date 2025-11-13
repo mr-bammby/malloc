@@ -126,3 +126,17 @@ void print_size(size_t size)
     write (1, num_str, cnt); // Print the address
     write (1, ") bytes", 7); // Print a new line
 }
+
+void ft_memcpy(void *dest, void *src, size_t len)
+{
+    unsigned char *dest_u = (unsigned char *)dest;
+    unsigned char *src_u  = (unsigned char *)src;
+    if (dest != NULL)
+    {
+        while (len > 0)
+        {
+            *dest_u++ = *src_u++;
+            len--;
+        }
+    }
+}

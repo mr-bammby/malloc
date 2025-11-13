@@ -1,10 +1,10 @@
 #ifndef IG_ZONE_ALLOCATOR_TINY_H
 #define IG_ZONE_ALLOCATOR_TINY_H
 
-#include <stdlib.h>
+#include <stddef.h>
 #include <inttypes.h>
 
-#define TINY_ALLOC_SIZE (size_t)64u // Size of each allocation For best performance multiple of 8
+#define TINY_ALLOC_SIZE (size_t)64u //Must be under 256
 
 void *ZoneAllocatorTiny_alloc(size_t size);
 short ZoneAllocatorTiny_free(void *ptr);

@@ -40,8 +40,9 @@ static size_t new_map_add(small_map_header_t **new_map, size_t size)
 		}
 	}
 	*new_map = mmap(NULL, map_size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
-	if (new_map == MAP_FAILED)
+	if (*new_map == MAP_FAILED)
 	{
+		*new_map = NULL;
 		AllocManager_uninit(SMALL_MANAGER);
 		return 0u;
 	}
@@ -139,7 +140,18 @@ void *ZoneAllocatorSmall_alloc(size_t size)
 	size_t free_map_size;
 	void *ret = NULL;
 
-	if ((size == 0) || (SMALL_ALLOC_MANAGER.small_alloc_cnt > SMALL_ALLOC_NUM))
+	if (size == 0)
+	{
+		return (ret);
+	}
+	if (alloc_manager == NULL)
+    {
+        if (AllocManager_init(SMALL_MANAGER))
+        {
+            return (ret);
+        }
+    }
+	if (SMALL_ALLOC_MANAGER.small_alloc_cnt >= SMALL_ALLOC_NUM)
 	{
 		return (ret);
 	}
@@ -175,6 +187,14 @@ size_t ZoneAllocatorSmall_size_get(void *ptr)
     {
         ret = 0; // Invalid pointer
     }
+	else if (alloc_manager == NULL)
+	{
+		ret = 0;
+	}
+	else if (alloc_manager->small_set == 0)
+	{
+		ret = 0;
+	}
     else
     {
 		small_map_header_t *current_map = SMALL_ALLOC_MANAGER.small_zone_start;
@@ -245,6 +265,14 @@ short ZoneAllocatorSmall_free(void *ptr)
     {
         ret = -1; // Invalid pointer
     }
+	else if (alloc_manager == NULL)
+	{
+		ret = -2;
+	}
+	else if (alloc_manager->small_set == 0)
+	{
+		ret = -2;
+	}
 	else
     {
 		small_map_header_t *current_map = SMALL_ALLOC_MANAGER.small_zone_start;
@@ -305,17 +333,29 @@ short ZoneAllocatorSmall_free(void *ptr)
 
 // This function only performs a realocation if the pointer is valid and the size is valid for the small zone.
 // It checks if the pointer is in the small zone.
-short ZoneAllocatorSmall_realloc(void *ptr, size_t size)
+short ZoneAllocatorSmall_realloc(void **ptr, size_t size)
 {
 	short ret = 0;
 
 	if (ptr == NULL)
 	{
+		*ptr = NULL;
 		ret = -1; // Invalid pointer
+	}
+	else if (alloc_manager == NULL)
+	{
+		*ptr = NULL;
+		ret = -2;
+	}
+	else if (alloc_manager->small_set == 0)
+	{
+		*ptr = NULL;
+		ret = -2;
 	}
 	else if (size == 0)
 	{
-		ret = ZoneAllocatorSmall_free(ptr);
+		*ptr = NULL;
+		ret = -1;
 	}
 	else
 	{
@@ -329,12 +369,20 @@ short ZoneAllocatorSmall_realloc(void *ptr, size_t size)
 			current_block = current_map->first_block;
 			while (current_block != NULL)
 			{
-				if (((void *)current_block + SMALL_BLOCK_HEADER_SIZE) == ptr)
+				if (((void *)current_block + SMALL_BLOCK_HEADER_SIZE) == *ptr)
 				{
+					if ((size < SMALL_ALLOC_SIZE_MIN) || (size > SMALL_ALLOC_SIZE_MAX))
+					{
+						alloc_manager->realloc_hlp.mem_size = current_block->used;
+						alloc_manager->realloc_hlp.mem = *ptr;
+						alloc_manager->realloc_hlp.manager = SMALL_MANAGER;
+						*ptr = NULL;
+						break;
+					}
+					small_block_header_t* next_block = current_block->next;
 					size_t aligned_size = (size + SMALL_BLOCK_HEADER_SIZE) / SMALL_ALLOC_ALIGMENT; // Calculate the aligned size
 					aligned_size = aligned_size * SMALL_ALLOC_ALIGMENT; // Align the size
-					aligned_size += (aligned_size % SMALL_ALLOC_ALIGMENT == 0u) ? (0u) : (SMALL_ALLOC_ALIGMENT); // Align to 16
-					small_block_header_t* next_block = current_block->next;
+					aligned_size += (aligned_size % SMALL_ALLOC_ALIGMENT == 0u) ? (0u) : (SMALL_ALLOC_ALIGMENT); 
 					if (current_block->size < size)
 					{
 						if ((next_block != NULL)) 
@@ -360,6 +408,49 @@ short ZoneAllocatorSmall_realloc(void *ptr, size_t size)
 							}
 							else
 							{
+								void *tmp = *ptr;
+								*ptr = ZoneAllocatorSmall_alloc(size);
+								if (*ptr != NULL)
+								{
+									ft_memcpy(*ptr, tmp, current_block->used);
+									current_block->used = 0; //Freed
+									current_map->cnt--;
+									SMALL_ALLOC_MANAGER.small_alloc_cnt--;
+									if(current_map->cnt == 0)
+									{
+										if (prev_map == NULL)
+										{
+											SMALL_ALLOC_MANAGER.small_zone_start = current_map->next;
+										}
+										else
+										{
+											prev_map->next = current_map->next;
+										}
+										if (current_map->next == NULL)
+										{
+											SMALL_ALLOC_MANAGER.small_zone_end = prev_map;
+										}
+										munmap((void *)current_map, current_map->size);
+										AllocManager_uninit(SMALL_MANAGER);
+									}
+									else
+									{
+										defrag(prev_block, current_block);
+									}
+								}
+								else
+								{
+									ret = -2;
+								}
+							}
+						}
+						else
+						{
+							*ptr = ZoneAllocatorSmall_alloc(size);
+							if (*ptr != NULL)
+							{
+								void *tmp = *ptr;
+								ft_memcpy(*ptr, tmp, current_block->used);
 								current_block->used = 0; //Freed
 								current_map->cnt--;
 								SMALL_ALLOC_MANAGER.small_alloc_cnt--;
@@ -384,37 +475,11 @@ short ZoneAllocatorSmall_realloc(void *ptr, size_t size)
 								{
 									defrag(prev_block, current_block);
 								}
-								ptr = ZoneAllocatorSmall_alloc(size);
-							}
-
-						}
-						else
-						{
-							current_block->used = 0; //Freed
-							current_map->cnt--;
-							SMALL_ALLOC_MANAGER.small_alloc_cnt--;
-							if(current_map->cnt == 0)
-							{
-								if (prev_map == NULL)
-								{
-									SMALL_ALLOC_MANAGER.small_zone_start = current_map->next;
-								}
-								else
-								{
-									prev_map->next = current_map->next;
-								}
-								if (current_map->next == NULL)
-								{
-									SMALL_ALLOC_MANAGER.small_zone_end = prev_map;
-								}
-								munmap((void *)current_map, current_map->size);
-								AllocManager_uninit(SMALL_MANAGER);
 							}
 							else
 							{
-								defrag(prev_block, current_block);
+								ret = -2;
 							}
-							ptr = ZoneAllocatorSmall_alloc(size);
 						}
 					}
 					else
@@ -433,10 +498,6 @@ short ZoneAllocatorSmall_realloc(void *ptr, size_t size)
 			prev_map = current_map;
 			current_map = current_map->next;
 		}
-		if (current_block == NULL)
-		{
-			ptr = ZoneAllocatorSmall_alloc(size);
-		}
     }
 	return ret;
 }
@@ -445,7 +506,7 @@ short ZoneAllocatorSmall_realloc(void *ptr, size_t size)
 // This function prints the memory map of the big zone.
 // It prints the start address, end address, and size of each block.
 // It also prints the start address of each map.
-void ZoneAllocatorBig_report(void)
+void ZoneAllocatorSmall_report(void)
 {
     if (SMALL_ALLOC_MANAGER.small_zone_start == NULL)
     {

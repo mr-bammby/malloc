@@ -25,6 +25,7 @@ short AllocManager_init(alloc_manager_e manager)
             return -1;
         }
         alloc_manager->size = page_size;
+        alloc_manager->realloc_hlp.mem = NULL;
     }
     switch (manager)
     {
