@@ -6,7 +6,7 @@
 #include "alloc_manager.h"
 #include <stddef.h>
 
-void *ft_realloc(void* ptr, size_t size)
+void *realloc(void* ptr, size_t size)
 {
     short found = 0;
     void * temp_ptr = ptr;
@@ -17,6 +17,11 @@ void *ft_realloc(void* ptr, size_t size)
     if (ptr == NULL)
     {
         return(no_block_malloc(size));
+    }
+
+    if (size == 0)
+    {
+        return (NULL);
     }
 
     if(alloc_manager == NULL)

@@ -30,7 +30,7 @@ void *no_block_malloc(size_t size)
     return (ptr);
 }
 
-void *ft_malloc(size_t size)
+void *malloc(size_t size)
 {
     
     void *ptr = NULL;

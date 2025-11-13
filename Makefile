@@ -36,7 +36,7 @@ INCLUDES = -I $(SRCD)main/inc_pub \
 
 CC       = gcc
 CFLAGS   = -Wall -Wextra -Werror -fPIC $(INCLUDES)
-LDFLAGS  = -shared
+LDFLAGS  = -shared -ldl
 LDVER    = -Wl,--version-script=$(VERSION_SCRIPT)
 
 

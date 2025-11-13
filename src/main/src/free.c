@@ -6,7 +6,7 @@
 #endif /* FT_BONUS */
 #include <stddef.h>
 
-void ft_free(void* ptr)
+void free(void* ptr)
 {
     short ret;
 
