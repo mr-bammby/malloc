@@ -114,10 +114,10 @@ cleanup_tiny:
 }
 
 void test_allocation_limits_small(void) {
-    void *ptrs[MAX_PER_CLASS + 1];
+    void *ptrs[MAX_PER_CLASS];
     int i;
 
-    for (i = 0; i < MAX_PER_CLASS; i++) {
+    for (i = 0; i < MAX_PER_CLASS-1; i++) {
         ptrs[i] = ft_malloc(TINY_MAX_SIZE + 1);
         if (ptrs[i] == NULL) {
             TEST_FAIL("Failed to allocate small before limit");

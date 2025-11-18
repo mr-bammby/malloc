@@ -6,17 +6,15 @@
 #include <unistd.h>
 #include <stdio.h>
 
-#define ALIGN_UP(n, a) ((((n) + (a) - 1) / (a)) * (a))
-
-
-#define SMALL_BLOCK_HEADER_SIZE sizeof(small_block_header_t) /* Size of the header */
-#define SMALL_MAP_HEADER_SIZE sizeof(small_map_header_t) /* Size of the header */
+//#define SMALL_BLOCK_HEADER_SIZE sizeof(small_block_header_t) /* Size of the header */
+//#define SMALL_MAP_HEADER_SIZE sizeof(small_map_header_t) /* Size of the header */
 #define SMALL_MAP_DEFAULT_ALLOC 16ul /* in pages */
-#define SMALL_ALLOC_ALIGMENT 8u /* Alignment of the small allocation */
+#define SMALL_ALLOC_ALIGMENT sizeof(void*) /* Alignment of the small allocation */
 #define SMALL_ALLOC_NUM 125u
 #define SMALL_ALLOC_MANAGER alloc_manager->small_manager
 
-#define PADDED_SMALL_BLOCK_HEADER_SIZE ALIGN_UP(sizeof(small_block_header_t), SMALL_ALLOC_ALIGMENT)
+#define ALIGNED_SMALL_BLOCK_HEADER_SIZE ALIGN_UP_CONST(sizeof(small_block_header_t), SMALL_ALLOC_ALIGMENT)
+#define ALIGNED_SMALL_MAP_HEADER_SIZE ALIGN_UP_CONST(sizeof(small_map_header_t), SMALL_ALLOC_ALIGMENT)
 
 /**
  * @brief Adds a new memory map for small allocations.
@@ -34,7 +32,6 @@
  */
 static size_t new_map_add(small_map_header_t **new_map, size_t size)
 {
-    size_t aligned_size;
     const size_t page_size = sysconf(_SC_PAGESIZE);
     size_t map_size = page_size * SMALL_MAP_DEFAULT_ALLOC; /* Get the page size */
     if (AllocManager_init(SMALL_MANAGER) != 0)
@@ -66,11 +63,8 @@ static size_t new_map_add(small_map_header_t **new_map, size_t size)
     (*new_map)->cnt = 1;
     (*new_map)->size = map_size;
     SMALL_ALLOC_MANAGER.small_zone_end = *new_map;
-    aligned_size = SMALL_MAP_HEADER_SIZE / SMALL_ALLOC_ALIGMENT;
-    aligned_size = (SMALL_MAP_HEADER_SIZE % SMALL_ALLOC_ALIGMENT == 0) ? (aligned_size) : (aligned_size + 1);
-    aligned_size *= SMALL_ALLOC_ALIGMENT;
-    SMALL_ALLOC_MANAGER.small_zone_end->first_block = (small_block_header_t *)((uint8_t *)SMALL_ALLOC_MANAGER.small_zone_end + aligned_size);
-    return (map_size - aligned_size);
+    SMALL_ALLOC_MANAGER.small_zone_end->first_block = (small_block_header_t *)((uint8_t *)SMALL_ALLOC_MANAGER.small_zone_end + ALIGNED_SMALL_MAP_HEADER_SIZE);
+    return (map_size - ALIGNED_SMALL_MAP_HEADER_SIZE);
 }
 
 /**
@@ -88,19 +82,14 @@ static size_t new_map_add(small_map_header_t **new_map, size_t size)
  */
 static void *new_map_alloc(size_t size, size_t free_map_size)
 {
-    size_t full_block_size;
     SMALL_ALLOC_MANAGER.small_zone_end->first_block->used = size;
-    full_block_size = size + SMALL_BLOCK_HEADER_SIZE;
-    SMALL_ALLOC_MANAGER.small_zone_end->first_block->size = full_block_size / SMALL_ALLOC_ALIGMENT;
-    SMALL_ALLOC_MANAGER.small_zone_end->first_block->size = (full_block_size % SMALL_ALLOC_ALIGMENT == 0) ? (SMALL_ALLOC_MANAGER.small_zone_end->first_block->size) : (SMALL_ALLOC_MANAGER.small_zone_end->first_block->size + 1);
-    SMALL_ALLOC_MANAGER.small_zone_end->first_block->size *= SMALL_ALLOC_ALIGMENT;
-    SMALL_ALLOC_MANAGER.small_zone_end->first_block->size -= SMALL_BLOCK_HEADER_SIZE;
-    if ((free_map_size - SMALL_ALLOC_MANAGER.small_zone_end->first_block->size) > (2 * SMALL_BLOCK_HEADER_SIZE))
+    SMALL_ALLOC_MANAGER.small_zone_end->first_block->size = ALIGN_UP(size, SMALL_ALLOC_ALIGMENT);
+    if ((free_map_size - SMALL_ALLOC_MANAGER.small_zone_end->first_block->size) > (2 * ALIGNED_SMALL_BLOCK_HEADER_SIZE)) // Smallest possible allocation
     {
-        SMALL_ALLOC_MANAGER.small_zone_end->first_block->next = (small_block_header_t *)((uint8_t *)SMALL_ALLOC_MANAGER.small_zone_end->first_block + SMALL_ALLOC_MANAGER.small_zone_end->first_block->size + SMALL_BLOCK_HEADER_SIZE);
+        SMALL_ALLOC_MANAGER.small_zone_end->first_block->next = (small_block_header_t *)((uint8_t *)SMALL_ALLOC_MANAGER.small_zone_end->first_block + SMALL_ALLOC_MANAGER.small_zone_end->first_block->size + ALIGNED_SMALL_BLOCK_HEADER_SIZE);
         SMALL_ALLOC_MANAGER.small_zone_end->first_block->next->next = NULL;
-        free_map_size -= (SMALL_ALLOC_MANAGER.small_zone_end->first_block->size + SMALL_BLOCK_HEADER_SIZE);
-        SMALL_ALLOC_MANAGER.small_zone_end->first_block->next->size = free_map_size - SMALL_BLOCK_HEADER_SIZE;
+        free_map_size -= (SMALL_ALLOC_MANAGER.small_zone_end->first_block->size + ALIGNED_SMALL_BLOCK_HEADER_SIZE);
+        SMALL_ALLOC_MANAGER.small_zone_end->first_block->next->size = free_map_size - ALIGNED_SMALL_BLOCK_HEADER_SIZE;
         SMALL_ALLOC_MANAGER.small_zone_end->first_block->next->used = 0;
     }
     else
@@ -108,7 +97,7 @@ static void *new_map_alloc(size_t size, size_t free_map_size)
         SMALL_ALLOC_MANAGER.small_zone_end->first_block->next = NULL;
     }
     SMALL_ALLOC_MANAGER.small_alloc_cnt++;
-    return ((uint8_t *)SMALL_ALLOC_MANAGER.small_zone_end->first_block + SMALL_BLOCK_HEADER_SIZE);
+    return ((uint8_t *)SMALL_ALLOC_MANAGER.small_zone_end->first_block + ALIGNED_SMALL_BLOCK_HEADER_SIZE);
 }
 
 /**
@@ -127,32 +116,29 @@ static void *old_map_alloc(size_t size)
 {
     small_map_header_t *current_map = SMALL_ALLOC_MANAGER.small_zone_start;
     small_block_header_t *current_block, *new_block;
-    size_t full_size, aligned_size, required, diff;
+    size_t aligned_size, diff;
     void *ret = NULL;
-    full_size = size + SMALL_BLOCK_HEADER_SIZE;
-    aligned_size = full_size / SMALL_ALLOC_ALIGMENT;
-    aligned_size = (full_size % SMALL_ALLOC_ALIGMENT == 0) ? aligned_size : (aligned_size + 1);
-    aligned_size *= SMALL_ALLOC_ALIGMENT; 
-    required = aligned_size - SMALL_BLOCK_HEADER_SIZE; /* Needed data size */
+    aligned_size = ALIGN_UP(size, SMALL_ALLOC_ALIGMENT); 
     while (current_map != NULL)
     {
         current_block = current_map->first_block;
         while (current_block != NULL)
         {
-            if ((current_block->used == 0) && (current_block->size >= required))
+            if ((current_block->used == 0) && (current_block->size >= aligned_size))
             {
                 current_block->used = size;
-                diff = current_block->size - required;
-                if (diff > 2 * SMALL_BLOCK_HEADER_SIZE)
+                diff = current_block->size - aligned_size;
+                if (diff > (ALIGNED_SMALL_BLOCK_HEADER_SIZE + SMALL_ALLOC_SIZE_MIN))
                 {
-                    new_block = (void *)((uint8_t *)current_block + aligned_size);
+                    new_block = (void *)((uint8_t *)current_block + aligned_size + ALIGNED_SMALL_BLOCK_HEADER_SIZE);
                     new_block->next = current_block->next;
                     current_block->next = new_block;
-                    new_block->size = diff - SMALL_BLOCK_HEADER_SIZE;
+                    new_block->size = diff - ALIGNED_SMALL_BLOCK_HEADER_SIZE;
                     new_block->used = 0;
-                    current_block->size = required;
+                    current_block->size = aligned_size;
+;
                 }
-                ret = (void *)current_block + SMALL_BLOCK_HEADER_SIZE;
+                ret = (void *)((uint8_t *)current_block + ALIGNED_SMALL_BLOCK_HEADER_SIZE);
                 current_map->cnt++;
                 SMALL_ALLOC_MANAGER.small_alloc_cnt++;
                 break;
@@ -257,7 +243,7 @@ size_t ZoneAllocatorSmall_size_get(void *ptr)
             current_block = current_map->first_block;
             while (current_block != NULL)
             {
-                if (((void *)current_block + SMALL_BLOCK_HEADER_SIZE) == ptr)
+                if ((void *)((uint8_t *)current_block + ALIGNED_SMALL_BLOCK_HEADER_SIZE) == ptr)
                 {
                     ret = current_block->used;
                     break;
@@ -297,7 +283,7 @@ static void defrag(small_block_header_t* prev_block, small_block_header_t *block
             if (next_block->used == 0)
             {
                 size += next_block->size;
-                size += SMALL_BLOCK_HEADER_SIZE;
+                size += ALIGNED_SMALL_BLOCK_HEADER_SIZE;
                 temp_block = next_block->next;
             }
         }
@@ -306,7 +292,7 @@ static void defrag(small_block_header_t* prev_block, small_block_header_t *block
             if (prev_block->used == 0u)
             {
                 size += prev_block->size;
-                size += SMALL_BLOCK_HEADER_SIZE;
+                size += ALIGNED_SMALL_BLOCK_HEADER_SIZE;
                 prev_block->size = size;
                 prev_block->next = temp_block;
                 return;
@@ -355,7 +341,7 @@ short ZoneAllocatorSmall_free(void *ptr)
             current_block = current_map->first_block;
             while (current_block != NULL)
             {
-                if (((void *)current_block + SMALL_BLOCK_HEADER_SIZE) == ptr)
+                if ((void *)((uint8_t *)current_block + ALIGNED_SMALL_BLOCK_HEADER_SIZE) == ptr)
                 {
                     current_block->used = 0; /* Freed */
                     current_map->cnt--;
@@ -505,7 +491,7 @@ short ZoneAllocatorSmall_realloc(void **ptr, size_t size)
             current_block = current_map->first_block;
             while (current_block != NULL)
             {
-                if (((void *)current_block + SMALL_BLOCK_HEADER_SIZE) == *ptr)
+                if ((void *)((uint8_t *)current_block + ALIGNED_SMALL_BLOCK_HEADER_SIZE) == *ptr)
                 {
                     if ((size < SMALL_ALLOC_SIZE_MIN) || (size > SMALL_ALLOC_SIZE_MAX))
                     {
@@ -516,30 +502,31 @@ short ZoneAllocatorSmall_realloc(void **ptr, size_t size)
                         break;
                     }
                     small_block_header_t* next_block = current_block->next;
-                    size_t aligned_size = (size + SMALL_BLOCK_HEADER_SIZE) / SMALL_ALLOC_ALIGMENT; /* Calculate the aligned size */
-                    aligned_size = aligned_size * SMALL_ALLOC_ALIGMENT; /* Align the size */
-                    aligned_size += (aligned_size % SMALL_ALLOC_ALIGMENT == 0u) ? (0u) : (SMALL_ALLOC_ALIGMENT);
+                    size_t aligned_size = ALIGN_UP(size, SMALL_ALLOC_ALIGMENT);
                     if (current_block->size < size)
                     {
-                        if ((next_block != NULL))
+                        if ((next_block != NULL) && (next_block->used == 0u))
                         {
-                            size_t max_size = current_block->size + next_block->size + 2 * SMALL_BLOCK_HEADER_SIZE;
-                            if (max_size > aligned_size)
+                            size_t max_size = current_block->size + next_block->size + ALIGNED_SMALL_BLOCK_HEADER_SIZE;
+                            if (max_size >= aligned_size)
                             {
                                 current_block->used = size;
                                 size_t size_diff = max_size - aligned_size;
-                                if (size_diff > (2 * SMALL_BLOCK_HEADER_SIZE))
+                                if (size_diff > (ALIGNED_SMALL_BLOCK_HEADER_SIZE + SMALL_ALLOC_SIZE_MIN))
                                 {
-                                    current_block->next = (void *)((uint8_t *)current_block + aligned_size);
+                                    // Split: create new free block
+                                    current_block->next = (void *)((uint8_t *)current_block + aligned_size + ALIGNED_SMALL_BLOCK_HEADER_SIZE);
                                     current_block->next->next = next_block->next;
                                     current_block->next->used = 0;
-                                    current_block->next->size = size_diff - SMALL_BLOCK_HEADER_SIZE;
+                                    current_block->next->size = size_diff - ALIGNED_SMALL_BLOCK_HEADER_SIZE;
+                                    current_block->size = aligned_size;
                                 }
                                 else
                                 {
+                                    // Absorb whole without split
                                     current_block->next = next_block->next;
+                                    current_block->size = max_size;
                                 }
-                                current_block->size = aligned_size - SMALL_BLOCK_HEADER_SIZE;
                             }
                             else
                             {
@@ -581,6 +568,10 @@ short ZoneAllocatorSmall_realloc(void **ptr, size_t size)
  */
 void ZoneAllocatorSmall_report(void)
 {
+    if (alloc_manager == NULL)
+    {
+        return;
+    }
     if (SMALL_ALLOC_MANAGER.small_zone_start == NULL)
     {
         return;
@@ -597,9 +588,9 @@ void ZoneAllocatorSmall_report(void)
         {
             if (current_block->used != 0u)
             {
-                print_address_as_hex((void *)((uint8_t *)current_block + SMALL_BLOCK_HEADER_SIZE)); /* Print the address of the block */
+                print_address_as_hex((void *)((uint8_t *)current_block + ALIGNED_SMALL_BLOCK_HEADER_SIZE)); /* Print the address of the block */
                 write(1, " - ", 3);
-                print_address_as_hex((void *)((uint8_t *)current_block + SMALL_BLOCK_HEADER_SIZE + current_block->used)); /* Print the end address */
+                print_address_as_hex((void *)((uint8_t *)current_block + ALIGNED_SMALL_BLOCK_HEADER_SIZE + current_block->used)); /* Print the end address */
                 write(1, " : ", 3);
                 print_size(current_block->used); /* Print the size of the block */
                 write(1, "\n", 1);

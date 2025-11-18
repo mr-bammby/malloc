@@ -2,7 +2,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "../src/main/inc_pub/malloc.h"
 
 int main() {
     printf("Starting test...\n");

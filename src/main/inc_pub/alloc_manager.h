@@ -8,6 +8,33 @@
 #include <pthread.h>
 #endif /* FT_BONUS */
 
+/**
+ * @brief Align a value upwards to the nearest multiple of `align`.
+ *
+ * This macro uses bit manipulation for maximum performance and is fully
+ * evaluable at compile-time when both arguments are constants.
+ *
+ * Example:
+ *   ALIGN_UP(37, 8)  → 40
+ *   ALIGN_UP(32, 8)  → 32
+ *
+ * Used heavily for headers and block sizes → must be fast and correct.
+ *
+ * @note `align` must be a power of 2 (8, 16, 32, 64, etc.).
+ *       This is guaranteed in your code (SMALL_ALLOC_ALIGMENT = 8).
+ */
+#define ALIGN_UP_CONST(value, align) \
+    (((value) + (align) - 1) & ~((align) - 1))
+
+/**
+ * @brief Align a value upwards — safer runtime version with type preservation.
+ *
+ * Use this only if you need to silence warnings or support non-constant align.
+ * In your case, ALIGN_UP() above is sufficient and preferred.
+ */
+#define ALIGN_UP(value, align) \
+    (((value) + (typeof(value))((align) - 1)) & ~(typeof(value))((align) - 1))
+
 typedef enum
 {
     TINY_MANAGER = 1,
@@ -27,9 +54,9 @@ struct small_block_header
 
 struct small_map_header
 {
-    small_block_header_t *first_block; 	// Size of the block
-    size_t cnt; 						// Used for mumap
-	size_t size;						// Used for mumap
+    small_block_header_t *first_block; 	// Location of the first block
+    size_t cnt; 						// Used for mumap of maps
+	size_t size;						// Used for mumap of maps
 	small_map_header_t *next; 			// Pointer to the next map
 };
 
@@ -45,9 +72,8 @@ struct large_block_header
 
 struct large_map_header
 {
-    large_block_header_t *first_block; 	// Size of the block
-    size_t cnt; 						// Used for mumap
-	size_t size;						// Used for mumap
+    large_block_header_t *first_block; 	// Location of the first block
+	size_t size;						// Used for mumap of maps
     large_map_header_t *next; 			// Pointer to the next map
 };
 

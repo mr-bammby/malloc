@@ -6,122 +6,154 @@
 #include <unistd.h>
 #include <stdio.h>
 
-#define LARGE_BLOCK_HEADER_SIZE sizeof(large_block_header_t) // Size of the header
-#define LARGE_MAP_HEADER_SIZE sizeof(large_map_header_t) // Size of the header
+/** Alignment for large allocations — natural pointer alignment (8 bytes on x86_64) */
+#define LARGE_ALLOC_ALIGMENT sizeof(void*)
 
-#define LARGE_ALLOC_ALIGMENT 8u // Alignment of the large allocation
+/** Maximum number of concurrent large allocations allowed by the subject */
 #define LARGE_ALLOC_NUM 125u
 
+/** Shortcut to the large zone manager structure */
 #define LARGE_ALLOC_MANAGER alloc_manager->large_manager
 
+/** Compile-time aligned header sizes using constant-expression alignment */
+#define ALIGNED_LARGE_BLOCK_HEADER_SIZE ALIGN_UP_CONST(sizeof(large_block_header_t), LARGE_ALLOC_ALIGMENT)
+#define ALIGNED_LARGE_MAP_HEADER_SIZE    ALIGN_UP_CONST(sizeof(large_map_header_t), LARGE_ALLOC_ALIGMENT)
 
+/**
+ * @brief Creates and maps a new memory region dedicated to a single large allocation.
+ *
+ * @details
+ * Each large allocation gets its own mmap'ed region containing:
+ * - One map header
+ * - One block header
+ * - User data of at least `size` bytes
+ *
+ * The total size is rounded up to full pages.
+ *
+ * @param new_map Pointer to store the address of the new map header
+ * @param size    Minimum user-requested data size
+ * @return        Usable space after the map header, or 0 on failure
+ */
 static size_t new_map_add(large_map_header_t **new_map, size_t size)
 {
-	size_t aligned_size, map_size = 0;
-	const int page_size = sysconf(_SC_PAGESIZE) ; // Get the page size
-	const size_t full_size = size + LARGE_BLOCK_HEADER_SIZE + LARGE_MAP_HEADER_SIZE;
+    size_t map_size = 0;
+    const int page_size = sysconf(_SC_PAGESIZE); // Get the page size
+    const size_t full_size = ALIGN_UP(size, LARGE_ALLOC_ALIGMENT) + ALIGNED_LARGE_MAP_HEADER_SIZE;
 
-	if (AllocManager_init(LARGE_MANAGER) != 0)
-	{
-		return 0u;
-	}
-	map_size = full_size / page_size;
-	map_size = ((full_size % page_size) == 0) ? (map_size) : (map_size + 1);
-	map_size *= page_size;
+    /* Initialize global manager on first large allocation */
+    if (AllocManager_init(LARGE_MANAGER) != 0)
+    {
+        return 0u;
+    }
 
-	if (is_mmap_safe(map_size) != 0)
-	{
-		AllocManager_uninit(LARGE_MANAGER);
-		return 0u;
-	}
-	*new_map = mmap(NULL, map_size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
-	if (*new_map == MAP_FAILED)
-	{
-		AllocManager_uninit(LARGE_MANAGER);
-		*new_map = NULL;
-		return 0u;
-	}
-	(*new_map)-> next = NULL;
-	(*new_map)-> cnt = 1;
-	(*new_map)-> size = map_size;
-	LARGE_ALLOC_MANAGER.large_zone_end = *new_map;
+    /* Compute smallest multiple of page_size that fits everything */
+    map_size = full_size / page_size;
+    map_size = ((full_size % page_size) == 0) ? (map_size) : (map_size + 1);
+    map_size *= page_size;
 
-	aligned_size = LARGE_MAP_HEADER_SIZE / LARGE_ALLOC_ALIGMENT;
-	aligned_size = (LARGE_MAP_HEADER_SIZE % LARGE_ALLOC_ALIGMENT == 0) ? (aligned_size) : (aligned_size + 1);
-	aligned_size *= LARGE_ALLOC_ALIGMENT;
-	LARGE_ALLOC_MANAGER.large_zone_end->first_block = (large_block_header_t *)((uint8_t *)LARGE_ALLOC_MANAGER.large_zone_end + aligned_size);
+    /* Respect resource limits (RLIMIT_AS / RLIMIT_DATA) */
+    if (is_mmap_safe(map_size) != 0)
+    {
+        AllocManager_uninit(LARGE_MANAGER);
+        return 0u;
+    }
 
-	return (map_size - aligned_size);
+    *new_map = mmap(NULL, map_size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+    if (*new_map == MAP_FAILED)
+    {
+        AllocManager_uninit(LARGE_MANAGER);
+        *new_map = NULL;
+        return 0u;
+    }
+
+    (*new_map)->next = NULL;
+    (*new_map)->size = map_size;
+    LARGE_ALLOC_MANAGER.large_zone_end = *new_map;
+
+    /* First (and only) block starts right after the aligned map header */
+    LARGE_ALLOC_MANAGER.large_zone_end->first_block = (large_block_header_t *)((uint8_t *)LARGE_ALLOC_MANAGER.large_zone_end + ALIGNED_LARGE_MAP_HEADER_SIZE);
+
+    return (map_size - ALIGNED_LARGE_MAP_HEADER_SIZE);
 }
 
+/**
+ * @brief Initializes the single block inside a freshly mapped large region.
+ *
+ * @param size          Original user-requested size
+ * @param free_map_size Total usable space in the map (after map header)
+ * @return              Pointer to the user-accessible memory
+ */
 static void *new_map_alloc(size_t size, size_t free_map_size)
 {
-	size_t full_block_size;
+    LARGE_ALLOC_MANAGER.large_zone_end->first_block->used = size;
+    LARGE_ALLOC_MANAGER.large_zone_end->first_block->size = free_map_size - ALIGNED_LARGE_BLOCK_HEADER_SIZE;
+    LARGE_ALLOC_MANAGER.large_zone_end->first_block->next = NULL;
 
-	LARGE_ALLOC_MANAGER.large_zone_end->first_block->used = size;
-	full_block_size = size + LARGE_BLOCK_HEADER_SIZE;
-	LARGE_ALLOC_MANAGER.large_zone_end->first_block->size  = full_block_size / LARGE_ALLOC_ALIGMENT;
-	LARGE_ALLOC_MANAGER.large_zone_end->first_block->size  = (full_block_size % LARGE_ALLOC_ALIGMENT == 0) ? (LARGE_ALLOC_MANAGER.large_zone_end->first_block->size) : (LARGE_ALLOC_MANAGER.large_zone_end->first_block->size + 1);
-	LARGE_ALLOC_MANAGER.large_zone_end->first_block->size  *= LARGE_ALLOC_ALIGMENT;
-	LARGE_ALLOC_MANAGER.large_zone_end->first_block->size -= LARGE_BLOCK_HEADER_SIZE;
-	if ((free_map_size - LARGE_ALLOC_MANAGER.large_zone_end->first_block->size) > (2 * LARGE_BLOCK_HEADER_SIZE))
-	{
-		LARGE_ALLOC_MANAGER.large_zone_end->first_block->next = (large_block_header_t *)((uint8_t *)LARGE_ALLOC_MANAGER.large_zone_end->first_block + LARGE_ALLOC_MANAGER.large_zone_end->first_block->size + LARGE_BLOCK_HEADER_SIZE);
-		LARGE_ALLOC_MANAGER.large_zone_end->first_block->next->next = NULL;
-		free_map_size -= (LARGE_ALLOC_MANAGER.large_zone_end->first_block->size + LARGE_BLOCK_HEADER_SIZE);
-		LARGE_ALLOC_MANAGER.large_zone_end->first_block->next->size = free_map_size - LARGE_BLOCK_HEADER_SIZE;
-		LARGE_ALLOC_MANAGER.large_zone_end->first_block->next->used = 0;
-	}
-	else
-	{
-		LARGE_ALLOC_MANAGER.large_zone_end->first_block->next = NULL;
-	}
-	LARGE_ALLOC_MANAGER.large_alloc_cnt++;
+    LARGE_ALLOC_MANAGER.large_alloc_cnt++;
 
-	return ((uint8_t *)LARGE_ALLOC_MANAGER.large_zone_end->first_block + LARGE_BLOCK_HEADER_SIZE);
+    return ((void *)((uint8_t *)LARGE_ALLOC_MANAGER.large_zone_end->first_block + ALIGNED_LARGE_BLOCK_HEADER_SIZE));
 }
 
-// Allocates a block of memory of the given size.
+/**
+ * @brief Allocates a large memory block (> SMALL_ALLOC_SIZE_MAX).
+ *
+ * @details
+ * Large allocations are handled via dedicated mmap regions.
+ * Each call creates a new map containing exactly one block.
+ *
+ * @param size Requested size in bytes
+ * @return Pointer to allocated memory or NULL on failure / size == 0
+ */
 void *ZoneAllocatorLarge_alloc(size_t size)
 {
-	size_t free_map_size;
-	void * ret = NULL;
+    size_t free_map_size;
+    void *ret = NULL;
 
-	if (size == 0)
-	{
-		return (ret);
-	}
-	if (alloc_manager == NULL)
+    if (size == 0)
+    {
+        return (ret);
+    }
+
+    if (alloc_manager == NULL)
     {
         if (AllocManager_init(LARGE_MANAGER))
         {
             return (ret);
         }
     }
-	if (LARGE_ALLOC_MANAGER.large_alloc_cnt >= LARGE_ALLOC_NUM)
-	{
-		return (ret);
-	}
-	if (LARGE_ALLOC_MANAGER.large_zone_start == NULL) 
-	{
-		free_map_size = new_map_add(&(LARGE_ALLOC_MANAGER.large_zone_start), size);
-	}
-	else
-	{
-		free_map_size = new_map_add(&(LARGE_ALLOC_MANAGER.large_zone_end->next), size);
-	}
-	if (free_map_size == 0u)
-	{
-		return (NULL);
-	}
-	else
-	{
-		ret = new_map_alloc(size, free_map_size);	
-	}
+
+    if (LARGE_ALLOC_MANAGER.large_alloc_cnt >= LARGE_ALLOC_NUM)
+    {
+        return (ret);
+    }
+
+    if (LARGE_ALLOC_MANAGER.large_zone_start == NULL)
+    {
+        free_map_size = new_map_add(&(LARGE_ALLOC_MANAGER.large_zone_start), size);
+    }
+    else
+    {
+        free_map_size = new_map_add(&(LARGE_ALLOC_MANAGER.large_zone_end->next), size);
+    }
+
+    if (free_map_size == 0u)
+    {
+        return (NULL);
+    }
+    else
+    {
+        ret = new_map_alloc(size, free_map_size);
+    }
 
     return (ret);
 }
 
+/**
+ * @brief Retrieves the original requested size of a large allocation.
+ *
+ * @param ptr User pointer returned by ZoneAllocatorLarge_alloc()
+ * @return    Original size passed to alloc(), or 0 if invalid/not found
+ */
 size_t ZoneAllocatorLarge_size_get(void *ptr)
 {
     size_t ret = 0;
@@ -130,357 +162,265 @@ size_t ZoneAllocatorLarge_size_get(void *ptr)
     {
         ret = 0; // Invalid pointer
     }
-	else if (alloc_manager == NULL)
-	{
-		ret = 0;
-	}
-	else if (alloc_manager->large_set == 0)
-	{
-		ret = 0;
-	}
+    else if (alloc_manager == NULL)
+    {
+        ret = 0;
+    }
+    else if (alloc_manager->large_set == 0)
+    {
+        ret = 0;
+    }
     else
     {
-		large_map_header_t *current_map = LARGE_ALLOC_MANAGER.large_zone_start;
-		large_block_header_t *current_block;
+        large_map_header_t *current_map = LARGE_ALLOC_MANAGER.large_zone_start;
+        large_block_header_t *current_block;
 
-		while (current_map != NULL)
-		{
-			current_block = current_map->first_block;
-			while (current_block != NULL)
-			{
-				if (((void *)current_block + LARGE_BLOCK_HEADER_SIZE) == ptr)
-				{
-					ret = current_block->used;
-					break;
-				}
-				current_block = current_block->next;
-			}
-			if (ret != 0)
-			{
-				break;
-			}
-			current_map = current_map->next;
-		}
+        while (current_map != NULL)
+        {
+            current_block = current_map->first_block;
+            while (current_block != NULL)
+            {
+                if ((void *)((uint8_t *)current_block + ALIGNED_LARGE_BLOCK_HEADER_SIZE) == ptr)
+                {
+                    ret = current_block->used;
+                    break;
+                }
+                current_block = current_block->next;
+            }
+            if (ret != 0)
+            {
+                break;
+            }
+            current_map = current_map->next;
+        }
     }
     return (ret);
 }
 
-static void defrag(large_block_header_t* prev_block, large_block_header_t *block)
-{
-	if (block != NULL)
-	{
-		large_block_header_t* next_block = block->next;
-		size_t size = block->size;
-		large_block_header_t* temp_block = block->next;
-
-		if (next_block != NULL)
-		{
-			if (next_block->used == 0)
-			{
-				size += next_block->size;
-				size += LARGE_BLOCK_HEADER_SIZE;
-				temp_block = next_block->next;
-			}
-		}
-		if (prev_block != NULL)
-		{
-			if (prev_block->used == 0)
-			{
-				size += prev_block->size;
-				size += LARGE_BLOCK_HEADER_SIZE;
-				prev_block->size = size;
-				prev_block->next = temp_block;
-				return;
-			}
-		}
-		block->size = size;
-		block->next = temp_block;
-		return;
-	}
-
-}
-
-// Frees the memory block pointed to by ptr.
+/**
+ * @brief Frees a large allocation by unmapping its entire dedicated region.
+ *
+ * @details
+ * Since each large block lives alone in its map, the whole region is returned to the OS.
+ *
+ * @param ptr Pointer to free
+ * @return 0 on success, -1 (invalid), -2 (not found/uninitialized)
+ */
 short ZoneAllocatorLarge_free(void *ptr)
 {
     short ret = 0;
+
     if (ptr == NULL)
     {
         ret = -1; // Invalid pointer
     }
-	else if (alloc_manager == NULL)
-	{
-		ret = -2;
-	}
-	else if (alloc_manager->large_set == 0)
-	{
-		ret = -2;
-	}
-	else
+    else if (alloc_manager == NULL)
     {
-		large_map_header_t *current_map = LARGE_ALLOC_MANAGER.large_zone_start;
-		large_map_header_t *prev_map = NULL;
-		large_block_header_t *current_block, *prev_block;
+        ret = -2;
+    }
+    else if (alloc_manager->large_set == 0)
+    {
+        ret = -2;
+    }
+    else
+    {
+        large_map_header_t *current_map = LARGE_ALLOC_MANAGER.large_zone_start;
+        large_map_header_t *prev_map = NULL;
+        large_block_header_t *current_block;
 
-		while (current_map != NULL)
-		{
-			prev_block = NULL;
-			current_block = current_map->first_block;
-			while (current_block != NULL)
-			{
-				if (((void *)current_block + LARGE_BLOCK_HEADER_SIZE) == ptr)
-				{
-					current_block->used = 0; //Freed
-					current_map->cnt--;
-					LARGE_ALLOC_MANAGER.large_alloc_cnt--;
-					if(current_map->cnt == 0)
-					{	
-						if (prev_map == NULL)
-						{
-							LARGE_ALLOC_MANAGER.large_zone_start = current_map->next;
-						}
-						else
-						{
-							prev_map->next = current_map->next;
-						}
-						if (current_map->next == NULL)
-						{
-							LARGE_ALLOC_MANAGER.large_zone_end = prev_map;
-						}
-						munmap((void *)current_map, current_map->size);
-						AllocManager_uninit(LARGE_MANAGER);
-					}
-					else
-					{
-						defrag(prev_block, current_block);
-					}
-					break;
-				}
-				prev_block = current_block;
-				current_block = current_block->next;
-			}
-			if (current_block != NULL)
-			{
-				break;
-			}
-			prev_map = current_map;
-			current_map = current_map->next;
-		}
-		if (current_map == NULL)
-		{
-			ret = -2; //Not found
-		}
+        while (current_map != NULL)
+        {
+            current_block = current_map->first_block;
+            while (current_block != NULL)
+            {
+                if ((void *)((uint8_t *)current_block + ALIGNED_LARGE_BLOCK_HEADER_SIZE) == ptr)
+                {
+                    /* Remove map from linked list */
+                    if (prev_map == NULL)
+                    {
+                        LARGE_ALLOC_MANAGER.large_zone_start = current_map->next;
+                    }
+                    else
+                    {
+                        prev_map->next = current_map->next;
+                    }
+                    if (current_map->next == NULL)
+                    {
+                        LARGE_ALLOC_MANAGER.large_zone_end = prev_map;
+                    }
+
+                    LARGE_ALLOC_MANAGER.large_alloc_cnt--;
+                    munmap((void *)current_map, current_map->size);
+                    AllocManager_uninit(LARGE_MANAGER);
+                    break;
+                }
+                current_block = current_block->next;
+            }
+            if (current_block != NULL)
+            {
+                break;
+            }
+            prev_map = current_map;
+            current_map = current_map->next;
+        }
+        if (current_map == NULL)
+        {
+            ret = -2; // Not found
+        }
     }
     return (ret);
 }
 
-// This function only performs a realocation if the pointer is valid and the size is valid for the large zone.
-// It checks if the pointer is in the large zone.
+/**
+ * @brief Resizes a large allocation.
+ *
+ * @details
+ * - Shrink: update used size only
+ * - Grow: allocate new block, copy data, free old
+ * - Size no longer large: hand off via realloc helper
+ *
+ * @param ptr  Pointer to user pointer (updated on success)
+ * @param size New requested size
+ * @return 0 on success, negative on error
+ */
 short ZoneAllocatorLarge_realloc(void **ptr, size_t size)
 {
-	short ret = 0;
+    short ret = 0;
 
-	if (*ptr == NULL)
-	{
-		ret = -1; // Invalid pointer
-	}
-	else if (alloc_manager == NULL)
-	{
-		*ptr = NULL;
-		ret = -2;
-	}
-	else if (alloc_manager->large_set == 0)
-	{
-		*ptr = NULL;
-		ret = -2;
-	}
-	else if (size == 0)
-	{
-		*ptr = NULL;
-		ret = -1;
-	}
-	else
-	{
-		large_map_header_t *current_map = LARGE_ALLOC_MANAGER.large_zone_start;
-		large_map_header_t *prev_map = NULL;
-		large_block_header_t *current_block, *prev_block;
-
-		while (current_map != NULL)
-		{
-			prev_block = NULL;
-			current_block = current_map->first_block;
-			while (current_block != NULL)
-			{
-				if (((void *)current_block + LARGE_BLOCK_HEADER_SIZE) == ptr)
-				{
-					if ((size < LARGE_ALLOC_SIZE_MIN))
-					{
-						alloc_manager->realloc_hlp.mem_size = current_block->used;
-						alloc_manager->realloc_hlp.mem = *ptr;
-						alloc_manager->realloc_hlp.manager = LARGE_MANAGER;
-						*ptr = NULL;
-						break;
-					}
-					size_t aligned_size = (size + LARGE_BLOCK_HEADER_SIZE) / LARGE_ALLOC_ALIGMENT; // Calculate the aligned size
-					aligned_size = aligned_size * LARGE_ALLOC_ALIGMENT; // Align the size
-					aligned_size += (aligned_size % LARGE_ALLOC_ALIGMENT == 0u) ? (0u) : (LARGE_ALLOC_ALIGMENT); // Align to 16
-					large_block_header_t* next_block = current_block->next;
-					if (current_block->size < size)
-					{
-						if ((next_block != NULL)) 
-						{
-							size_t max_size = current_block->size + next_block->size + 2 * LARGE_BLOCK_HEADER_SIZE;
-							if (max_size > aligned_size)
-							{
-								current_block->used = size;
-								size_t size_diff = max_size  - aligned_size;
-								if (size_diff > (2 * LARGE_BLOCK_HEADER_SIZE))
-								{
-									current_block->next = (void *)((uint8_t *)current_block + aligned_size);
-									current_block->next->next = next_block->next;
-									current_block->next->used = 0;
-									current_block->next->size = size_diff - LARGE_BLOCK_HEADER_SIZE;
-								}
-								else
-								{
-									current_block->next = next_block->next;
-								}
-								
-								current_block->size = aligned_size - LARGE_BLOCK_HEADER_SIZE;
-							}
-							else
-							{
-								void *tmp = *ptr;
-								*ptr = ZoneAllocatorLarge_alloc(size);
-								if (*ptr != NULL)
-								{
-									ft_memcpy(*ptr, tmp, current_block->used);
-									current_block->used = 0; //Freed
-									current_map->cnt--;
-									LARGE_ALLOC_MANAGER.large_alloc_cnt--;
-									if(current_map->cnt == 0)
-									{
-										if (prev_map == NULL)
-										{
-											LARGE_ALLOC_MANAGER.large_zone_start = current_map->next;
-										}
-										else
-										{
-											prev_map->next = current_map->next;
-										}
-										if (current_map->next == NULL)
-										{
-											LARGE_ALLOC_MANAGER.large_zone_end = prev_map;
-										}
-										munmap((void *)current_map, current_map->size);
-										AllocManager_uninit(LARGE_MANAGER);
-									}
-									else
-									{
-										defrag(prev_block, current_block);
-									}
-								}
-								else
-								{
-									ret = -2;
-								}
-							}
-						}
-						else
-						{
-							void *tmp = *ptr;
-							*ptr = ZoneAllocatorLarge_alloc(size);
-							if (*ptr != NULL)
-							{
-								ft_memcpy(*ptr, tmp, current_block->used);
-								current_block->used = 0; //Freed
-								current_map->cnt--;
-								LARGE_ALLOC_MANAGER.large_alloc_cnt--;
-								if(current_map->cnt == 0)
-								{
-									if (prev_map == NULL)
-									{
-										LARGE_ALLOC_MANAGER.large_zone_start = current_map->next;
-									}
-									else
-									{
-										prev_map->next = current_map->next;
-									}
-									if (current_map->next == NULL)
-									{
-										LARGE_ALLOC_MANAGER.large_zone_end = prev_map;
-									}
-									munmap((void *)current_map, current_map->size);
-									AllocManager_uninit(LARGE_MANAGER);
-								}
-								else
-								{
-									defrag(prev_block, current_block);
-								}
-							}
-							else
-							{
-								ret = -2;
-							}
-						}
-					}
-					else
-					{
-						current_block->used = size;
-					}
-					break;
-				}
-				prev_block = current_block;
-				current_block = current_block->next;
-			}
-			if (current_block != NULL)
-			{
-				break;
-			}
-			prev_map = current_map;
-			current_map = current_map->next;
-		}
-		if (current_block == NULL)
-		{
-			ptr = ZoneAllocatorLarge_alloc(size);
-		}
+    if (*ptr == NULL)
+    {
+        ret = -1; // Invalid pointer
     }
-	return ret;
+    else if (alloc_manager == NULL)
+    {
+        *ptr = NULL;
+        ret = -2;
+    }
+    else if (alloc_manager->large_set == 0)
+    {
+        *ptr = NULL;
+        ret = -2;
+    }
+    else if (size == 0)
+    {
+        *ptr = NULL;
+        ret = -1;
+    }
+    else
+    {
+        large_map_header_t *current_map = LARGE_ALLOC_MANAGER.large_zone_start;
+        large_map_header_t *prev_map = NULL;
+        large_block_header_t *current_block;
+
+        while (current_map != NULL)
+        {
+            current_block = current_map->first_block;
+            while (current_block != NULL)
+            {
+                if ((void *)((uint8_t *)current_block + ALIGNED_LARGE_BLOCK_HEADER_SIZE) == *ptr)
+                {
+                    /* Hand off to tiny/small realloc if size falls below large threshold */
+                    if ((size < LARGE_ALLOC_SIZE_MIN))
+                    {
+                        alloc_manager->realloc_hlp.mem_size = current_block->used;
+                        alloc_manager->realloc_hlp.mem = *ptr;
+                        alloc_manager->realloc_hlp.manager = LARGE_MANAGER;
+                        *ptr = NULL;
+                        break;
+                    }
+
+                    if (current_block->size < size)
+                    {
+                        void *tmp = *ptr;
+                        *ptr = ZoneAllocatorLarge_alloc(size);
+                        if (*ptr != NULL)
+                        {
+                            ft_memcpy(*ptr, tmp, current_block->used);
+
+                            /* Remove old map */
+                            if (prev_map == NULL)
+                            {
+                                LARGE_ALLOC_MANAGER.large_zone_start = current_map->next;
+                            }
+                            else
+                            {
+                                prev_map->next = current_map->next;
+                            }
+                            if (current_map->next == NULL)
+                            {
+                                LARGE_ALLOC_MANAGER.large_zone_end = prev_map;
+                            }
+                            LARGE_ALLOC_MANAGER.large_alloc_cnt--;
+                            munmap((void *)current_map, current_map->size);
+                            AllocManager_uninit(LARGE_MANAGER);
+                        }
+                        else
+                        {
+                            ret = -2;
+                        }
+                    }
+                    else
+                    {
+                        current_block->used = size;  /* In-place shrink */
+                    }
+                    break;
+                }
+                current_block = current_block->next;
+            }
+            if (current_block != NULL)
+            {
+                break;
+            }
+            prev_map = current_map;
+            current_map = current_map->next;
+        }
+    }
+    return ret;
 }
 
-
-// This function prints the memory map of the large zone.
-// It prints the start address, end address, and size of each block.
-// It also prints the start address of each map.
+/**
+ * @brief Prints all active large allocations in the expected format.
+ *
+ * Output example:
+ *   LARGE : 0x...
+ *   0x... - 0x... : size
+ */
 void ZoneAllocatorLarge_report(void)
 {
+    if (alloc_manager == NULL)
+    {
+        return;
+    }
     if (LARGE_ALLOC_MANAGER.large_zone_start == NULL)
     {
         return;
     }
-    write (1, "LARGE : ", 7);
-	large_map_header_t *current_map = LARGE_ALLOC_MANAGER.large_zone_start;
-	large_block_header_t *current_block;
-	while  (current_map != NULL)
-	{
-		print_address_as_hex((void *)current_map); // Print the start address of map
-		write (1, "\n", 1);
 
-		current_block = current_map->first_block; // Set the current block
-		while (current_block != NULL)
-		{
-			if (current_block->used != 0u)
-			{
-				print_address_as_hex((void *)((uint8_t *)current_block + LARGE_BLOCK_HEADER_SIZE)); //Print the address of the block
-				write (1, " - ", 3);
-				print_address_as_hex((void *)((uint8_t *)current_block + LARGE_BLOCK_HEADER_SIZE + current_block->used)); //Print the end address
-				write (1, " : ", 3);
-				print_size(current_block->used); // Print the size of the block
-				write (1, "\n", 1);
-			}
-			current_block = current_block->next; // Move to the next block
-		}
-		write (1, "\n", 1);
-		current_map = current_map->next;
-	}
+    write(1, "LARGE :", 7);  /* 7 characters including trailing space */
+
+    large_map_header_t *current_map = LARGE_ALLOC_MANAGER.large_zone_start;
+    large_block_header_t *current_block;
+
+    while (current_map != NULL)
+    {
+        print_address_as_hex((void *)current_map);  /* Print map base address */
+        write(1, "\n", 1);
+
+        current_block = current_map->first_block;
+        while (current_block != NULL)
+        {
+            if (current_block->used != 0u)
+            {
+                print_address_as_hex((void *)((uint8_t *)current_block + ALIGNED_LARGE_BLOCK_HEADER_SIZE));
+                write(1, " - ", 3);
+                print_address_as_hex((void *)((uint8_t *)current_block + ALIGNED_LARGE_BLOCK_HEADER_SIZE + current_block->used));
+                write(1, " : ", 3);
+                print_size(current_block->used);
+                write(1, "\n", 1);
+            }
+            current_block = current_block->next;
+        }
+        write(1, "\n", 1);
+        current_map = current_map->next;
+    }
 }

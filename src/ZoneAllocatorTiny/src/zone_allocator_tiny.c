@@ -8,7 +8,7 @@
 
 #define TINY_ALLOC_COUNT 125u /* Number of allocations */
 #define TINY_ZONE_SIZE (TINY_ALLOC_SIZE * TINY_ALLOC_COUNT) + TINY_ALLOC_COUNT /* Total size of the tiny zone */
-#define TINY_ALLOC_ALIGMENT 8u /* Alignment of the tiny allocation */
+#define TINY_ALLOC_ALIGMENT sizeof(void*) /* Alignment of the tiny allocation */
 
 #define TINY_ALLOC_MANAGER alloc_manager->tiny_manager
 
@@ -259,6 +259,10 @@ short ZoneAllocatorTiny_realloc(void **ptr, size_t size)
  */
 void ZoneAllocatorTiny_report(void)
 {
+    if (alloc_manager == NULL)
+    {
+        return;
+    }
     if (TINY_ALLOC_MANAGER.tiny_zone_map == NULL)
     {
         return;

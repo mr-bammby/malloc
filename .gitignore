@@ -56,3 +56,9 @@ main.c
 
 #vscode config
 .vscode/
+
+#build files
+bin/
+obj/
+obj_bonus/
+build/
