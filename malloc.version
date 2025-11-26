@@ -1,8 +1,0 @@
-{
-global:
-malloc;
-free;
-realloc;
-show_alloc_mem;
-local: *;
-};

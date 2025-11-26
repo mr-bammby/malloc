@@ -55,7 +55,11 @@ void *realloc(void* ptr, size_t size)
     void * temp_ptr = ptr;
 
     #ifdef FT_BONUS
-    pthread_mutex_lock(&alloc_mutex);
+    if (pthread_mutex_lock(&alloc_mutex))
+    {
+        write(STDOUT_FILENO, "Mutex fail\n", 11);
+        return (NULL);
+    }
     #endif /* FT_BONUS */
     if (ptr == NULL)
     {
@@ -64,7 +68,7 @@ void *realloc(void* ptr, size_t size)
     }
     else if (size == 0)
     {
-        temp_ptr = NULL;
+        no_block_free(ptr);
         found = 2;
     }
     else if(alloc_manager == NULL)
@@ -112,12 +116,11 @@ void *realloc(void* ptr, size_t size)
     }
     if (found == 1)
     {
-        temp_ptr = ptr;
         temp_ptr = no_block_malloc(size);
         if (temp_ptr != NULL)
         {
-            ft_memcpy(temp_ptr, alloc_manager->realloc_hlp.mem, alloc_manager->realloc_hlp.mem_size);
-            
+            size_t cpy_size = (alloc_manager->realloc_hlp.mem_size > size) ? (size) : (alloc_manager->realloc_hlp.mem_size);
+            ft_memcpy(temp_ptr, alloc_manager->realloc_hlp.mem, cpy_size);
             switch (alloc_manager->realloc_hlp.manager)
             {
                 case TINY_MANAGER:
@@ -127,7 +130,7 @@ void *realloc(void* ptr, size_t size)
                     ZoneAllocatorSmall_free(alloc_manager->realloc_hlp.mem);
                     break;
                 case LARGE_MANAGER:
-                    ZoneAllocatorTiny_free(alloc_manager->realloc_hlp.mem);
+                    ZoneAllocatorLarge_free(alloc_manager->realloc_hlp.mem);
                     break;
                 default:
                     break;
@@ -143,5 +146,10 @@ void *realloc(void* ptr, size_t size)
     #ifdef FT_BONUS
     pthread_mutex_unlock(&alloc_mutex);
     #endif /* FT_BONUS */
+    int i = 0;
+    if (temp_ptr == ptr)
+    {
+        i = 1;
+    }
     return temp_ptr;
 }

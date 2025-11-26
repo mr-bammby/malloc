@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <inttypes.h>
+#include <unistd.h>
 
 #ifdef FT_BONUS
 #include <pthread.h>
@@ -60,21 +61,14 @@ struct small_map_header
 	small_map_header_t *next; 			// Pointer to the next map
 };
 
-typedef struct large_block_header large_block_header_t;
 typedef struct large_map_header large_map_header_t;
-
-struct large_block_header
-{
-    size_t size; // Size of the block
-    size_t used; // Used size of the block
-    large_block_header_t *next; // Pointer to the next block
-};
 
 struct large_map_header
 {
-    large_block_header_t *first_block; 	// Location of the first block
 	size_t size;						// Used for mumap of maps
+    size_t full_size;
     large_map_header_t *next; 			// Pointer to the next map
+    size_t used; // Used size of the block
 };
 
 typedef struct tiny_manager_s

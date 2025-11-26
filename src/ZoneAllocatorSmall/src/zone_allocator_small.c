@@ -34,13 +34,15 @@ static size_t new_map_add(small_map_header_t **new_map, size_t size)
 {
     const size_t page_size = sysconf(_SC_PAGESIZE);
     size_t map_size = page_size * SMALL_MAP_DEFAULT_ALLOC; /* Get the page size */
+    size_t min_size = ALIGN_UP(size, SMALL_ALLOC_ALIGMENT) + ALIGNED_SMALL_BLOCK_HEADER_SIZE + ALIGNED_SMALL_MAP_HEADER_SIZE;
+    
     if (AllocManager_init(SMALL_MANAGER) != 0)
     {
         return 0u;
     }
     while (is_mmap_safe(map_size) != 0)
     {
-        if (map_size < size)
+        if (map_size < min_size)
         {
             AllocManager_uninit(SMALL_MANAGER);
             return 0u;
@@ -62,8 +64,8 @@ static size_t new_map_add(small_map_header_t **new_map, size_t size)
     (*new_map)->next = NULL;
     (*new_map)->cnt = 1;
     (*new_map)->size = map_size;
-    SMALL_ALLOC_MANAGER.small_zone_end = *new_map;
-    SMALL_ALLOC_MANAGER.small_zone_end->first_block = (small_block_header_t *)((uint8_t *)SMALL_ALLOC_MANAGER.small_zone_end + ALIGNED_SMALL_MAP_HEADER_SIZE);
+    (*new_map)->first_block = (small_block_header_t *)((uint8_t *) (*new_map) + ALIGNED_SMALL_MAP_HEADER_SIZE);
+
     return (map_size - ALIGNED_SMALL_MAP_HEADER_SIZE);
 }
 
@@ -82,21 +84,24 @@ static size_t new_map_add(small_map_header_t **new_map, size_t size)
  */
 static void *new_map_alloc(size_t size, size_t free_map_size)
 {
+    free_map_size -= ALIGNED_SMALL_BLOCK_HEADER_SIZE;
     SMALL_ALLOC_MANAGER.small_zone_end->first_block->used = size;
     SMALL_ALLOC_MANAGER.small_zone_end->first_block->size = ALIGN_UP(size, SMALL_ALLOC_ALIGMENT);
-    if ((free_map_size - SMALL_ALLOC_MANAGER.small_zone_end->first_block->size) > (2 * ALIGNED_SMALL_BLOCK_HEADER_SIZE)) // Smallest possible allocation
+    if ((free_map_size - SMALL_ALLOC_MANAGER.small_zone_end->first_block->size) > (ALIGNED_SMALL_BLOCK_HEADER_SIZE + SMALL_ALLOC_SIZE_MIN)) // Smallest possible allocation
     {
         SMALL_ALLOC_MANAGER.small_zone_end->first_block->next = (small_block_header_t *)((uint8_t *)SMALL_ALLOC_MANAGER.small_zone_end->first_block + SMALL_ALLOC_MANAGER.small_zone_end->first_block->size + ALIGNED_SMALL_BLOCK_HEADER_SIZE);
         SMALL_ALLOC_MANAGER.small_zone_end->first_block->next->next = NULL;
         free_map_size -= (SMALL_ALLOC_MANAGER.small_zone_end->first_block->size + ALIGNED_SMALL_BLOCK_HEADER_SIZE);
-        SMALL_ALLOC_MANAGER.small_zone_end->first_block->next->size = free_map_size - ALIGNED_SMALL_BLOCK_HEADER_SIZE;
+        SMALL_ALLOC_MANAGER.small_zone_end->first_block->next->size = free_map_size;
         SMALL_ALLOC_MANAGER.small_zone_end->first_block->next->used = 0;
     }
     else
     {
+        SMALL_ALLOC_MANAGER.small_zone_end->first_block->size = free_map_size;
         SMALL_ALLOC_MANAGER.small_zone_end->first_block->next = NULL;
     }
     SMALL_ALLOC_MANAGER.small_alloc_cnt++;
+    
     return ((uint8_t *)SMALL_ALLOC_MANAGER.small_zone_end->first_block + ALIGNED_SMALL_BLOCK_HEADER_SIZE);
 }
 
@@ -118,6 +123,7 @@ static void *old_map_alloc(size_t size)
     small_block_header_t *current_block, *new_block;
     size_t aligned_size, diff;
     void *ret = NULL;
+
     aligned_size = ALIGN_UP(size, SMALL_ALLOC_ALIGMENT); 
     while (current_map != NULL)
     {
@@ -136,7 +142,6 @@ static void *old_map_alloc(size_t size)
                     new_block->size = diff - ALIGNED_SMALL_BLOCK_HEADER_SIZE;
                     new_block->used = 0;
                     current_block->size = aligned_size;
-;
                 }
                 ret = (void *)((uint8_t *)current_block + ALIGNED_SMALL_BLOCK_HEADER_SIZE);
                 current_map->cnt++;
@@ -191,10 +196,18 @@ void *ZoneAllocatorSmall_alloc(size_t size)
         if (SMALL_ALLOC_MANAGER.small_zone_start == NULL)
         {
             free_map_size = new_map_add(&(SMALL_ALLOC_MANAGER.small_zone_start), size);
+            if (free_map_size != 0u)
+            {
+                SMALL_ALLOC_MANAGER.small_zone_end = SMALL_ALLOC_MANAGER.small_zone_start;
+            }
         }
         else
         {
             free_map_size = new_map_add(&(SMALL_ALLOC_MANAGER.small_zone_end->next), size);
+            if (free_map_size != 0u)
+            {
+                SMALL_ALLOC_MANAGER.small_zone_end = SMALL_ALLOC_MANAGER.small_zone_end->next;
+            }
         }
         if (free_map_size == 0u)
         {
@@ -356,9 +369,11 @@ short ZoneAllocatorSmall_free(void *ptr)
                         {
                             prev_map->next = current_map->next;
                         }
-                        if (current_map->next == NULL)
+                        if (SMALL_ALLOC_MANAGER.small_zone_end == current_map)
                         {
                             SMALL_ALLOC_MANAGER.small_zone_end = prev_map;
+                            if (prev_map != NULL)
+                                prev_map->next = NULL;
                         }
                         munmap((void *)current_map, current_map->size);
                         AllocManager_uninit(SMALL_MANAGER);
@@ -425,9 +440,11 @@ static short realloc_cpy_free_hlp(void **ptr, size_t size, small_map_header_t *c
             {
                 prev_map->next = current_map->next;
             }
-            if (current_map->next == NULL)
+            if (SMALL_ALLOC_MANAGER.small_zone_end == current_map)
             {
                 SMALL_ALLOC_MANAGER.small_zone_end = prev_map;
+                if (prev_map != NULL)
+                    prev_map->next = NULL;
             }
             munmap((void *)current_map, current_map->size);
             AllocManager_uninit(SMALL_MANAGER);
@@ -553,6 +570,11 @@ short ZoneAllocatorSmall_realloc(void **ptr, size_t size)
             }
             prev_map = current_map;
             current_map = current_map->next;
+        }
+        if (current_map == NULL)
+        {
+            *ptr = NULL;
+            ret = NULL;
         }
     }
     return ret;

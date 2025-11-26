@@ -5,7 +5,25 @@
 
 #ifdef FT_BONUS
 /** Global mutex protecting all allocation operations (thread-safety bonus) */
-pthread_mutex_t alloc_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t alloc_mutex;
+
+__attribute__((constructor))
+void init_alloc_mutex(void) {
+    pthread_mutexattr_t attr;
+    pthread_mutexattr_init(&attr);
+    pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);  // Key change here
+    if (pthread_mutex_init(&alloc_mutex, NULL) != 0) {
+        write(STDERR_FILENO, "Pthread_mutex_init failed\n", 27);
+    }
+
+    write(STDERR_FILENO, "Pthread_mutex_init good\n", 25);
+}
+
+// Optional: Destroy on unload (rarely needed)
+__attribute__((destructor))
+void destroy_alloc_mutex(void) {
+    pthread_mutex_destroy(&alloc_mutex);
+}
 #endif /* FT_BONUS */
 
 /** Global allocation manager instance — allocated once via mmap, never resized */

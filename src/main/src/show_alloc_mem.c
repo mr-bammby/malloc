@@ -26,7 +26,11 @@ void show_alloc_mem(void)
 {
 #ifdef FT_BONUS
     /* Serialize access to allocation state — prevents torn reads during reporting */
-    pthread_mutex_lock(&alloc_mutex);
+    if (pthread_mutex_lock(&alloc_mutex))
+    {
+        write(STDOUT_FILENO, "Mutex fail\n", 11);
+        return;
+    }
 #endif /* FT_BONUS */
 
     /* Report allocations from each zone in ascending size order */

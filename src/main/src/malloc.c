@@ -79,7 +79,11 @@ void *malloc(size_t size)
 
 #ifdef FT_BONUS
     /* Critical section: protect entire allocation path for thread safety */
-    pthread_mutex_lock(&alloc_mutex);
+    if (pthread_mutex_lock(&alloc_mutex))
+    {
+        write(STDOUT_FILENO, "Mutex fail\n", 11);
+        return (NULL);
+    }
 #endif /* FT_BONUS */
 
     ptr = no_block_malloc(size);
