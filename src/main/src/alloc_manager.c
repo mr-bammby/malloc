@@ -4,8 +4,10 @@
 #include <sys/resource.h>
 
 #ifdef FT_BONUS
+
 /** Global mutex protecting all allocation operations (thread-safety bonus) */
 pthread_mutex_t alloc_mutex;
+
 
 __attribute__((constructor))
 void init_alloc_mutex(void) {
@@ -22,7 +24,7 @@ void init_alloc_mutex(void) {
 // Optional: Destroy on unload (rarely needed)
 __attribute__((destructor))
 void destroy_alloc_mutex(void) {
-    pthread_mutex_destroy(&alloc_mutex);
+    //pthread_mutex_destroy(&alloc_mutex); 
 }
 #endif /* FT_BONUS */
 

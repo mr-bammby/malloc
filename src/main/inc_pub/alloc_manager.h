@@ -9,6 +9,8 @@
 #include <pthread.h>
 #endif /* FT_BONUS */
 
+#define MALLOC_ALIGNMENT  (sizeof(uintptr_t) >= 8 ? 16 : 8)
+
 /**
  * @brief Align a value upwards to the nearest multiple of `align`.
  *

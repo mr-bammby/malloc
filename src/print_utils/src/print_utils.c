@@ -1,7 +1,7 @@
 #include "../inc_pub/print_utils.h"
 #include <unistd.h>
 
-#define HEX_ADDR_BUF_SIZE    16
+#define HEX_ADDR_BUF_SIZE    sizeof(void *) * 2
 #define DECIMAL_BUF_SIZE     50
 
 /**
@@ -138,6 +138,33 @@ void print_address_as_hex(void *ptr)
 }
 
 /**
+ * @brief Prints n byte dump in format
+ *
+ * Output format: FF FF FF ...
+ *
+ * @param ptr Pointer whose address to print
+ */
+void print_dump(void *ptr, size_t n)
+{
+    unsigned char *ptr_c = (unsigned char*)ptr;
+    size_t num;
+    char byte[3] = {0};
+
+    while (n != 0)
+    {
+        num = (size_t)*ptr_c;
+        itoa_size(num, 16, 2, byte);
+        write(1, byte, 2);
+        write(1, " ", 1);
+        n--;
+        if (n == 0u)
+        {
+            break;
+        }
+        ptr_c++;
+    }
+}
+/**
  * @brief Prints a size value in both decimal and hexadecimal with unit.
  *
  * Output format: `12345 (0x3039) bytes`
@@ -175,6 +202,17 @@ void print_size(size_t size)
     write(1, ") bytes", 7);
 }
 
+void print_dump_header(size_t n)
+{
+    const char line[] = "Address \\ Offset     0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f";
+    // each number takes exactly 2 characters: space + digit
+    // we want columns 0 to n → n+1 columns
+    size_t bytes = 16                     // "Address \\ Offset  "
+                 + (n + 1) * 3;            // n+1 numbers × " X"
+
+    write(STDOUT_FILENO, line, bytes);
+}
+
 /**
  * @brief Copies `len` bytes from `src` to `dest`.
  *
@@ -199,3 +237,5 @@ void ft_memcpy(void *dest, void *src, size_t len)
         }
     }
 }
+
+

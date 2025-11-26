@@ -18,6 +18,7 @@ SRCS = $(SRCD)main/src/alloc_manager.c \
        $(SRCD)main/src/malloc.c \
        $(SRCD)main/src/realloc.c \
 	   $(SRCD)main/src/show_alloc_mem.c \
+	   $(SRCD)main/src/show_alloc_mem_ex.c \
        $(SRCD)print_utils/src/print_utils.c \
        $(SRCD)ZoneAllocatorLarge/src/zone_allocator_large.c \
        $(SRCD)ZoneAllocatorSmall/src/zone_allocator_small.c \

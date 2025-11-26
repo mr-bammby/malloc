@@ -12,6 +12,7 @@ short ZoneAllocatorSmall_realloc(void **ptr, size_t size);
 
 size_t ZoneAllocatorSmall_size_get(void *ptr);
 void ZoneAllocatorSmall_report(void);
+void ZoneAllocatorSmall_dump(void);
 
 
 #endif // IG_ZONE_ALLOCATOR_SMALL_H

@@ -1,0 +1,9 @@
+{
+global:
+malloc;
+free;
+realloc;
+show_alloc_mem;
+show_alloc_mem_ex;
+local: *;
+};

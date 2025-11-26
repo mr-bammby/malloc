@@ -7,7 +7,7 @@
 #include <stdio.h>
 
 /** Alignment for large allocations — natural pointer alignment (8 bytes on x86_64) */
-#define LARGE_ALLOC_ALIGMENT sizeof(void*)
+#define LARGE_ALLOC_ALIGMENT MALLOC_ALIGNMENT
 
 /** Maximum number of concurrent large allocations allowed by the subject */
 #define LARGE_ALLOC_NUM 125u
@@ -422,6 +422,56 @@ void ZoneAllocatorLarge_report(void)
             write(1, " : ", 3);
             print_size(current_map->used);
             write(1, "\n", 1);
+        }
+        write(1, "\n", 1);
+        current_map = current_map->next;
+    }
+}
+
+void ZoneAllocatorLarge_dump(void)
+{
+    if (alloc_manager == NULL)
+    {
+        return;
+    }
+    if (LARGE_ALLOC_MANAGER.large_zone_start == NULL)
+    {
+        return;
+    }
+
+    write(1, "LARGE dump :", 12);  /* 7 characters including trailing space */
+
+    large_map_header_t *current_map = LARGE_ALLOC_MANAGER.large_zone_start;
+
+    while (current_map != NULL)
+    {
+        print_address_as_hex((void *)current_map);  /* Print map base address */
+        write(1, "\n", 1);
+
+        if (current_map->used != 0u)
+        {
+            write(1, "Alloc: ", 7);
+            print_address_as_hex((void *)((uint8_t *)current_map + ALIGNED_LARGE_MAP_HEADER_SIZE));
+            write(1, " - ", 3);
+            print_address_as_hex((void *)((uint8_t *)current_map + ALIGNED_LARGE_MAP_HEADER_SIZE + current_map->used));
+            write(1, " : ", 3);
+            print_size(current_map->used);
+            write(1, "\n", 1);
+
+            print_dump_header(LARGE_ALLOC_ALIGMENT);
+            write(1, "\n", 1);
+            size_t size = current_map->used;
+            size_t offset = 0u;
+            uint8_t *start = ((uint8_t *)current_map + ALIGNED_LARGE_MAP_HEADER_SIZE);
+            while (size > offset)
+            {
+                print_address_as_hex(start + offset);
+                write(1, ": ", 2);
+                size_t print_size = ((size - offset) < LARGE_ALLOC_ALIGMENT) ? (size - offset) : LARGE_ALLOC_ALIGMENT;
+                print_dump((void *)(start + offset), print_size);
+                write(1, "\n", 1);
+                offset += LARGE_ALLOC_ALIGMENT;
+            }
         }
         write(1, "\n", 1);
         current_map = current_map->next;

@@ -6,9 +6,13 @@
 #include <unistd.h>
 #include <stdio.h>
 
+#define TINY_ALLOC_ALIGMENT MALLOC_ALIGNMENT
+
 #define TINY_ALLOC_COUNT 125u /* Number of allocations */
-#define TINY_ZONE_SIZE (TINY_ALLOC_SIZE * TINY_ALLOC_COUNT) + TINY_ALLOC_COUNT /* Total size of the tiny zone */
-#define TINY_ALLOC_ALIGMENT sizeof(void*) /* Alignment of the tiny allocation */
+#define TINY_ZONE_HEADER_ALIGNED ALIGN_UP_CONST(TINY_ALLOC_COUNT, MALLOC_ALIGNMENT)
+#define TINY_ZONE_SIZE (TINY_ALLOC_SIZE * TINY_ALLOC_COUNT) + TINY_ZONE_HEADER_ALIGNED /* Total size of the tiny zone */
+
+
 
 #define TINY_ALLOC_MANAGER alloc_manager->tiny_manager
 
@@ -61,9 +65,7 @@ void *ZoneAllocatorTiny_alloc(size_t size)
             AllocManager_uninit(TINY_MANAGER);
             return NULL; /* Allocation failed */
         }
-        uint8_t aligned_count = TINY_ALLOC_COUNT / TINY_ALLOC_ALIGMENT; /* Calculate the number of aligned blocks */
-        aligned_count = (aligned_count * TINY_ALLOC_ALIGMENT) + ((TINY_ALLOC_COUNT % TINY_ALLOC_ALIGMENT == 0u) ? (0u) : (TINY_ALLOC_ALIGMENT)); /* Align to 16 */
-        TINY_ALLOC_MANAGER.tiny_zone_start = TINY_ALLOC_MANAGER.tiny_zone_map + aligned_count; /* Set the start pointer */
+        TINY_ALLOC_MANAGER.tiny_zone_start = TINY_ALLOC_MANAGER.tiny_zone_map + TINY_ZONE_HEADER_ALIGNED; /* Set the start pointer */
         TINY_ALLOC_MANAGER.tiny_zone_end = TINY_ALLOC_MANAGER.tiny_zone_start + TINY_ALLOC_SIZE * TINY_ALLOC_COUNT; /* Set the end pointer */
         TINY_ALLOC_MANAGER.tiny_alloc_cnt = 0u;
     }
@@ -290,6 +292,60 @@ void ZoneAllocatorTiny_report(void)
             write(1, " : ", 3);
             print_size(((uint8_t *)TINY_ALLOC_MANAGER.tiny_zone_map)[i]); /* Print the size of the block */
             write(1, "\n", 1);
+        }
+    }
+    write(1, "\n", 1);
+}
+
+
+
+/**
+ * @brief Prints a report of all allocated blocks in the tiny zone.
+ *
+ * @details
+ * Outputs the base address of the mapped zone, then iterates through all slots.
+ * For each allocated block (metadata != 0), prints the start address, end address
+ * (start + stored size), and the stored size. Only executes if the zone is mapped.
+ */
+void ZoneAllocatorTiny_dump(void)
+{
+    if (alloc_manager == NULL)
+    {
+        return;
+    }
+    if (TINY_ALLOC_MANAGER.tiny_zone_map == NULL)
+    {
+        return;
+    }
+    write(1, "TINY dump: ", 11);
+    print_address_as_hex(TINY_ALLOC_MANAGER.tiny_zone_map); /* Print the start address */
+    write(1, "\n", 1);
+    for (uint8_t i = 0u; i < TINY_ALLOC_COUNT; i++)
+    {
+        if (((uint8_t *)TINY_ALLOC_MANAGER.tiny_zone_map)[i] != 0u)
+        {
+            write(1, "Alloc: ", 7);
+            print_address_as_hex((void *)((size_t)TINY_ALLOC_MANAGER.tiny_zone_start + (i * TINY_ALLOC_SIZE))); /* Print the address of the block */
+            write(1, " - ", 3);
+            print_address_as_hex((void *)(((size_t)TINY_ALLOC_MANAGER.tiny_zone_start + (i * TINY_ALLOC_SIZE) + ((uint8_t *)TINY_ALLOC_MANAGER.tiny_zone_map)[i]))); /* Print the end address */
+            write(1, " : ", 3);
+            print_size(((uint8_t *)TINY_ALLOC_MANAGER.tiny_zone_map)[i]); /* Print the size of the block */
+            write(1, "\n", 1);
+            
+            print_dump_header(TINY_ALLOC_ALIGMENT);
+            write(1, "\n", 1);
+            size_t size = ((uint8_t *)TINY_ALLOC_MANAGER.tiny_zone_map)[i];
+            size_t offset = 0u;
+            uint8_t *start = (uint8_t *)((size_t)TINY_ALLOC_MANAGER.tiny_zone_start + (i * TINY_ALLOC_SIZE));
+            while (size > offset)
+            {
+                print_address_as_hex(start + offset);
+                write(1, ": ", 2);
+                size_t print_size = ((size - offset) < TINY_ALLOC_ALIGMENT) ? (size - offset) : TINY_ALLOC_ALIGMENT;
+                print_dump((void *)(start + offset), print_size);
+                write(1, "\n", 1);
+                offset += TINY_ALLOC_ALIGMENT;
+            }
         }
     }
     write(1, "\n", 1);

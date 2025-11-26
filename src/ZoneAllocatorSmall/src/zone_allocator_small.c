@@ -9,7 +9,7 @@
 //#define SMALL_BLOCK_HEADER_SIZE sizeof(small_block_header_t) /* Size of the header */
 //#define SMALL_MAP_HEADER_SIZE sizeof(small_map_header_t) /* Size of the header */
 #define SMALL_MAP_DEFAULT_ALLOC 16ul /* in pages */
-#define SMALL_ALLOC_ALIGMENT sizeof(void*) /* Alignment of the small allocation */
+#define SMALL_ALLOC_ALIGMENT MALLOC_ALIGNMENT /* Alignment of the small allocation */
 #define SMALL_ALLOC_NUM 125u
 #define SMALL_ALLOC_MANAGER alloc_manager->small_manager
 
@@ -632,6 +632,67 @@ void ZoneAllocatorSmall_report(void)
             current_block = current_block->next; /* Move to the next block */
         }
         write(1, "\n", 1);
+        current_map = current_map->next;
+    }
+}
+
+/**
+ * @brief Prints a report of all allocated blocks in the small zone.
+ *
+ * @details
+ * For each map, prints its base address. Then for each used block in the map,
+ * prints the user start address, end address (start + used size), and size.
+ * Only executes if at least one map exists.
+ */
+void ZoneAllocatorSmall_dump(void)
+{
+    if (alloc_manager == NULL)
+    {
+        return;
+    }
+    if (SMALL_ALLOC_MANAGER.small_zone_start == NULL)
+    {
+        return;
+    }
+    write(1, "SMALL dump : ", 12);
+    small_map_header_t *current_map = SMALL_ALLOC_MANAGER.small_zone_start;
+    small_block_header_t *current_block;
+    while (current_map != NULL)
+    {
+        print_address_as_hex((void *)current_map); /* Print the start address of map */
+        write(1, "\n", 1);
+        current_block = current_map->first_block; /* Set the current block */
+        while (current_block != NULL)
+        {
+            if (current_block->used != 0u)
+            {
+                write(1, "Alloc: ", 7);
+                print_address_as_hex((void *)((uint8_t *)current_block + ALIGNED_SMALL_BLOCK_HEADER_SIZE)); /* Print the address of the block */
+                write(1, " - ", 3);
+                print_address_as_hex((void *)((uint8_t *)current_block + ALIGNED_SMALL_BLOCK_HEADER_SIZE + current_block->used)); /* Print the end address */
+                write(1, " : ", 3);
+                print_size(current_block->used); /* Print the size of the block */
+                write(1, "\n", 1);
+
+                print_dump_header(SMALL_ALLOC_ALIGMENT);
+                write(1, "\n", 1);
+                size_t size = current_block->used;
+                size_t offset = 0u;
+                uint8_t *start = ((uint8_t *)current_block + ALIGNED_SMALL_BLOCK_HEADER_SIZE);
+                while (size > offset)
+                {
+                    print_address_as_hex(start + offset);
+                    write(1, ": ", 2);
+                    size_t print_size = ((size - offset) < SMALL_ALLOC_ALIGMENT) ? (size - offset) : SMALL_ALLOC_ALIGMENT;
+                    print_dump((void *)(start + offset), print_size);
+                    write(1, "\n", 1);
+                    offset += SMALL_ALLOC_ALIGMENT;
+                }
+            }
+            current_block = current_block->next; /* Move to the next block */
+        }
+        write(1, "\n", 1);
+
         current_map = current_map->next;
     }
 }
