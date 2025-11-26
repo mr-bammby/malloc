@@ -209,18 +209,21 @@ short ZoneAllocatorTiny_realloc(void **ptr, size_t size)
     else if (alloc_manager == NULL)
     {
         ret = -2;
+        *ptr = NULL; 
     }
     else if (alloc_manager->tiny_set == 0)
     {
         ret = -2;
+        *ptr = NULL; 
     }
     else if (*ptr < TINY_ALLOC_MANAGER.tiny_zone_start || *ptr > TINY_ALLOC_MANAGER.tiny_zone_end)
     {
+        ret = -2;
         *ptr = NULL; /* Pointer out of range */
     }
     else if ((size == 0))
     {
-        ret = -2;
+        ret = -1;
         *ptr = NULL; /* Invalid size */
     }
     else
@@ -232,17 +235,24 @@ short ZoneAllocatorTiny_realloc(void **ptr, size_t size)
         }
         else
         {
-            ret = 0;
-            if (size > TINY_ALLOC_SIZE)
+            if (((uint8_t *)TINY_ALLOC_MANAGER.tiny_zone_map)[index] != 0u)
             {
-                alloc_manager->realloc_hlp.mem_size = ((uint8_t *)TINY_ALLOC_MANAGER.tiny_zone_map)[index];
-                alloc_manager->realloc_hlp.mem = *ptr;
-                alloc_manager->realloc_hlp.manager = TINY_MANAGER;
-                *ptr = NULL; /* Invalid size */
+                ret = 0;
+                if (size > TINY_ALLOC_SIZE)
+                {
+                    alloc_manager->realloc_hlp.mem_size = ((uint8_t *)TINY_ALLOC_MANAGER.tiny_zone_map)[index];
+                    alloc_manager->realloc_hlp.mem = *ptr;
+                    alloc_manager->realloc_hlp.manager = TINY_MANAGER;
+                    *ptr = NULL; /* Invalid size */
+                }
+                else
+                {
+                    ((uint8_t *)TINY_ALLOC_MANAGER.tiny_zone_map)[index] = size;
+                }
             }
             else
             {
-                ((uint8_t *)TINY_ALLOC_MANAGER.tiny_zone_map)[index] = size;
+                *ptr = NULL;
             }
         }
     }

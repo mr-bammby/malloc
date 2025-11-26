@@ -477,6 +477,7 @@ static short realloc_cpy_free_hlp(void **ptr, size_t size, small_map_header_t *c
 short ZoneAllocatorSmall_realloc(void **ptr, size_t size)
 {
     short ret = 0;
+
     if (ptr == NULL)
     {
         *ptr = NULL;
@@ -510,6 +511,12 @@ short ZoneAllocatorSmall_realloc(void **ptr, size_t size)
             {
                 if ((void *)((uint8_t *)current_block + ALIGNED_SMALL_BLOCK_HEADER_SIZE) == *ptr)
                 {
+                    if (current_block->used == 0u)
+                    {
+                        *ptr = NULL;
+                        ret = -1;
+                        break;
+                    }
                     if ((size < SMALL_ALLOC_SIZE_MIN) || (size > SMALL_ALLOC_SIZE_MAX))
                     {
                         alloc_manager->realloc_hlp.mem_size = current_block->used;
@@ -568,13 +575,18 @@ short ZoneAllocatorSmall_realloc(void **ptr, size_t size)
             {
                 break;
             }
+            if (((void *)current_map <= *ptr) && ((void *)((uint8_t *)current_map + current_map->size) > *ptr))
+            {
+                *ptr = NULL;
+                ret = -1;
+                break;
+            }
             prev_map = current_map;
             current_map = current_map->next;
         }
         if (current_map == NULL)
         {
             *ptr = NULL;
-            ret = NULL;
         }
     }
     return ret;

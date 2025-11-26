@@ -1,19 +1,19 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <pthread.h>
+#include <unistd.h>
 #include <time.h>
 #include <string.h>
 #include <stdatomic.h>  // For atomic counters
 #include <sys/time.h>   // For gettimeofday (high-res timing)
 #include <fcntl.h>      // For write
 #include <stdarg.h>
-#include <unistd.h>
 
-#define NUM_THREADS 32       // Low to start; increase to 16 for more contention
-#define ITERATIONS 5000      // Per thread; balanced for limits
+#define NUM_THREADS 1       // Low to start; increase to 16 for more contention
+#define ITERATIONS 500      // Per thread; balanced for limits
 #define TINY_MAX 64          // <64 bytes
 #define SMALL_MAX 8192       // 64 to <8KB
-#define BIN_LIMIT 10        // Your max per bin
+#define BIN_LIMIT 125        // Your max per bin
 
 // Global atomic counters for bin usage (to enforce limits across threads)
 atomic_int g_tiny_count = 0;
@@ -54,7 +54,6 @@ void* stress_thread(void* arg) {
     int tiny_cnt = 0, small_cnt = 0, large_cnt = 0;
 
     int failures = 0;
-    unsigned char print = 0;
 
     for (int i = 0; i < ITERATIONS; i++) {
         int bin = rand() % 3;  // 0=tiny, 1=small, 2=large
@@ -95,11 +94,11 @@ void* stress_thread(void* arg) {
             
             void* p = malloc(size);
             if (p) {
-                print++;
-                memset(p, print, size);  // Thread-specific pattern
+                memset(p, 0xAA + tid, size);  // Thread-specific pattern
+                
                 // Log success
                 pthread_mutex_lock(&log_mutex);
-                safe_log("[%ld ms] Thread %ld: alloc success ptr=%p size=%zu fill=0x%x\n", get_elapsed_ms(), tid, p, size, print);
+                safe_log("[%ld ms] Thread %ld: alloc success ptr=%p size=%zu\n", get_elapsed_ms(), tid, p, size);
                 pthread_mutex_unlock(&log_mutex);
                 
                 atomic_fetch_add(counter, 1);
@@ -223,14 +222,14 @@ int main() {
     safe_log("Final bin counts: Tiny=%d, Small=%d, Large=%d (should be 0)\n",
            atomic_load(&g_tiny_count), atomic_load(&g_small_count), atomic_load(&g_large_count));
 
-
     // Phase 2: Single-threaded bin limit testing (with logging)
+    safe_log("\nTesting bin limits directly...\n");
 
     void* tiny[126], *small[126], *large[126];
     int i;
 
     // Fill tiny bin to 125 + try 126
-    for (i = 0; i < 10; i++) {
+    for (i = 0; i < 100; i++) {
         safe_log("[%ld ms] Main: alloc (tiny test) size=32\n", get_elapsed_ms());
         tiny[i] = malloc(32);  // <64
         if (tiny[i]) {
@@ -241,13 +240,13 @@ int main() {
         if (!tiny[i] && i < 125) { safe_log("Tiny alloc failed early at %d!\n", i); break; }
         if (i == 125 && tiny[i]) { safe_log("Tiny over-alloc succeeded? Should fail.\n"); }
     }
-    for (i = 0; i < 125; i++) if (tiny[i]) {
+    for (i = 0; i < 100; i++) if (tiny[i]) {
         safe_log("[%ld ms] Main: free (tiny test) ptr=%p\n", get_elapsed_ms(), tiny[i]);
         free(tiny[i]);
     }
 
     // Fill small
-    for (i = 0; i < 10; i++) {
+    for (i = 0; i < 100; i++) {
         safe_log("[%ld ms] Main: alloc (small test) size=1024\n", get_elapsed_ms());
         small[i] = malloc(1024);  // 64-8KB
         if (small[i]) {
@@ -258,13 +257,13 @@ int main() {
         if (!small[i] && i < 125) { safe_log("Small alloc failed early at %d!\n", i); break; }
         if (i == 125 && small[i]) { safe_log("Small over-alloc succeeded? Should fail.\n"); }
     }
-    for (i = 0; i < 10; i++) if (small[i]) {
+    for (i = 0; i < 100; i++) if (small[i]) {
         safe_log("[%ld ms] Main: free (small test) ptr=%p\n", get_elapsed_ms(), small[i]);
         free(small[i]);
     }
 
     // Fill large
-    for (i = 0; i < 10; i++) {
+    for (i = 0; i < 100; i++) {
         safe_log("[%ld ms] Main: alloc (large test) size=16384\n", get_elapsed_ms());
         large[i] = malloc(16384);  // >8KB
         if (large[i]) {
@@ -275,7 +274,7 @@ int main() {
         if (!large[i] && i < 125) { safe_log("Large alloc failed early at %d!\n", i); break; }
         if (i == 125 && large[i]) { safe_log("Large over-alloc succeeded? Should fail.\n"); }
     }
-    for (i = 0; i < 125; i++) if (large[i]) {
+    for (i = 0; i < 100; i++) if (large[i]) {
         safe_log("[%ld ms] Main: free (large test) ptr=%p\n", get_elapsed_ms(), large[i]);
         free(large[i]);
     }

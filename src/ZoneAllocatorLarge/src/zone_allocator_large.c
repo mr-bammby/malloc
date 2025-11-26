@@ -308,6 +308,12 @@ short ZoneAllocatorLarge_realloc(void **ptr, size_t size)
         {
             if ((void *)((uint8_t *)current_map + ALIGNED_LARGE_MAP_HEADER_SIZE) == *ptr)
             {
+                if (current_map->used == 0u)
+                {
+                    *ptr = NULL;
+                    ret = -1;
+                    break;
+                }
                 /* Hand off to tiny/small realloc if size falls below large threshold */
                 if ((size < LARGE_ALLOC_SIZE_MIN))
                 {
@@ -354,11 +360,20 @@ short ZoneAllocatorLarge_realloc(void **ptr, size_t size)
                     {
                         ret = -2;
                     }
-                    break;
                 }
                 else
                 {
                     current_map->used = size; /* In-place shrink */
+                }
+                break;
+            }
+            size_t temp;
+            if (safe_add_size_t((size_t)current_map, current_map->full_size, &temp) == 0)
+            {
+                if (((void *)current_map <= *ptr) && ((void *)(temp) > *ptr))
+                {
+                    *ptr = NULL;
+                    ret = -1;
                     break;
                 }
             }

@@ -51,7 +51,7 @@
  */
 void *realloc(void* ptr, size_t size)
 {
-    short found = 0;
+    short ret, found = 0;
     void * temp_ptr = ptr;
 
     #ifdef FT_BONUS
@@ -78,12 +78,16 @@ void *realloc(void* ptr, size_t size)
     }
     if (found == 0)
     {
-        (void)ZoneAllocatorTiny_realloc(&temp_ptr, size);
-        if (temp_ptr != NULL)
+        ret = ZoneAllocatorTiny_realloc(&temp_ptr, size);
+        if ((temp_ptr != NULL) || (ret == -1))
         {
             found = 2;
+            if (ret != 0)
+            {
+                temp_ptr = NULL;
+            }
         }
-        else
+        else if (ret == 0)
         {
             found = (alloc_manager->realloc_hlp.mem != NULL) ? 1 : 0;
         }
@@ -91,12 +95,16 @@ void *realloc(void* ptr, size_t size)
     if (found == 0)
     {
         temp_ptr = ptr;
-        (void)ZoneAllocatorSmall_realloc(&temp_ptr, size);
-        if (temp_ptr != NULL)
+        ret = ZoneAllocatorSmall_realloc(&temp_ptr, size);
+        if ((temp_ptr != NULL) || (ret == -1))
         {
             found = 2;
+            if (ret != 0)
+            {
+                temp_ptr = NULL;
+            }
         }
-        else
+        else if (ret == 0)
         {
             found = (alloc_manager->realloc_hlp.mem != NULL) ? 1 : 0;
         }
@@ -146,10 +154,6 @@ void *realloc(void* ptr, size_t size)
     #ifdef FT_BONUS
     pthread_mutex_unlock(&alloc_mutex);
     #endif /* FT_BONUS */
-    int i = 0;
-    if (temp_ptr == ptr)
-    {
-        i = 1;
-    }
+
     return temp_ptr;
 }
